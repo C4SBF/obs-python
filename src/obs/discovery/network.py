@@ -111,7 +111,37 @@ def _detect_interfaces() -> list[_InterfaceInfo]:
     if results:
         return results
 
-    # Method 3: socket (assumes /24)
+    # Method 3: ifaddr (cross-platform, works in containers)
+    try:
+        import ifaddr
+
+        for adapter in ifaddr.get_adapters():
+            if _is_virtual_interface(adapter.name):
+                continue
+            for ip_info in adapter.ips:
+                # Skip IPv6 and loopback
+                if not isinstance(ip_info.ip, str):
+                    continue
+                if ip_info.ip.startswith("127."):
+                    continue
+                prefix = getattr(ip_info, "network_prefix", 24)
+                results.append(
+                    _InterfaceInfo(
+                        iface=adapter.name,
+                        ip=ip_info.ip,
+                        cidr=f"{ip_info.ip}/{prefix}",
+                        method="ifaddr",
+                    )
+                )
+    except ImportError:
+        logger.debug("ifaddr module not available")
+    except (OSError, ValueError) as e:
+        logger.debug(f"ifaddr method failed: {e}")
+
+    if results:
+        return results
+
+    # Method 4: socket (assumes /24)
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 80))
@@ -161,10 +191,16 @@ def auto_detect_client_ip(device_address: str | None = None) -> str:
             if result.returncode == 0 and "src" in result.stdout:
                 parts = result.stdout.split()
                 src_ip = parts[parts.index("src") + 1]
+                # Look up actual prefix from interfaces
+                prefix = 24  # fallback
+                for iface in _detect_interfaces():
+                    if iface.ip == src_ip:
+                        prefix = int(iface.cidr.split("/")[1])
+                        break
                 logger.info(
-                    f"Auto-detected client IP via route to {device_address}: {src_ip}/24"
+                    f"Auto-detected client IP via route to {device_address}: {src_ip}/{prefix}"
                 )
-                return f"{src_ip}/24"
+                return f"{src_ip}/{prefix}"
         except FileNotFoundError:
             logger.debug("'ip' command not available")
         except (OSError, subprocess.SubprocessError, ValueError) as e:
