@@ -14,6 +14,8 @@ from .types import (
     BACnetObjectIdentifier,
     BACnetObjectsDiscoveryInput,
     BACnetObjectsDiscoveryResult,
+    BACnetReadInput,
+    BACnetReadResult,
     BACnetScanTimings,
 )
 
@@ -32,6 +34,8 @@ __all__ = [
     "scan_bacnet_network_sync",
     "discover_bacnet_objects",
     "discover_bacnet_objects_sync",
+    "read_bacnet_points",
+    "read_bacnet_points_sync",
 ]
 
 
@@ -176,4 +180,95 @@ def discover_bacnet_objects_sync(
             max_instance=max_instance,
         ),
         timeout=BACNET_OPERATION_TIMEOUT,
+    )
+
+
+async def read_bacnet_points(
+    device_address: str,
+    device_id: int,
+    points: list[tuple[str, int]],
+    *,
+    client_ip: str | None = None,
+    bbmd_ip: str | None = None,
+    timeout: float = 30.0,
+) -> BACnetReadResult:
+    """Read current values from BACnet points.
+
+    Args:
+        device_address: IP address of the BACnet device.
+        device_id: BACnet device ID.
+        points: List of (object_type, instance) tuples to read.
+        client_ip: Optional client IP for BACnet communication.
+        bbmd_ip: Optional BBMD IP for BACnet routing.
+        timeout: Read timeout in seconds.
+
+    Returns:
+        BACnetReadResult with list of BACnetObject containing current values.
+    """
+    device_identifier = BACnetDeviceIdentifier(
+        address=device_address, device_id=device_id
+    )
+    point_identifiers = [
+        BACnetObjectIdentifier(object_type=obj_type, instance=instance)
+        for obj_type, instance in points
+    ]
+    read_input = BACnetReadInput(
+        device=device_identifier,
+        points=point_identifiers,
+        client_ip=client_ip,
+        bbmd_ip=bbmd_ip,
+    )
+    started = utc_now()
+
+    try:
+        controller = get_bacnet_controller(client_ip=client_ip, bbmd_ip=bbmd_ip)
+        if not controller._initialized:
+            await controller.initialize()
+
+        results = await controller.read_points(
+            device_address,
+            device_id,
+            points,
+            timeout=timeout,
+        )
+        # Filter out None results
+        data = [obj for obj in results if obj is not None]
+        finished = utc_now()
+        return BACnetReadResult(
+            input=read_input,
+            data=data,
+            timings=_timings(started, finished),
+            success=True,
+        )
+    except _SCAN_FAILURES as exc:
+        finished = utc_now()
+        return BACnetReadResult(
+            input=read_input,
+            data=[],
+            timings=_timings(started, finished),
+            success=False,
+            error=str(exc),
+        )
+
+
+def read_bacnet_points_sync(
+    device_address: str,
+    device_id: int,
+    points: list[tuple[str, int]],
+    *,
+    client_ip: str | None = None,
+    bbmd_ip: str | None = None,
+    timeout: float = 30.0,
+) -> BACnetReadResult:
+    """Synchronous wrapper for read_bacnet_points()."""
+    return run_sync(
+        read_bacnet_points(
+            device_address,
+            device_id,
+            points,
+            client_ip=client_ip,
+            bbmd_ip=bbmd_ip,
+            timeout=timeout,
+        ),
+        timeout=timeout + 30,
     )

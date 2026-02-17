@@ -15,6 +15,8 @@ __all__ = [
     "BACnetObjectsDiscoveryInput",
     "BACnetNetworkScanResult",
     "BACnetObjectsDiscoveryResult",
+    "BACnetReadInput",
+    "BACnetReadResult",
 ]
 
 
@@ -109,6 +111,27 @@ class BACnetObjectsDiscoveryResult:
     """Result wrapper for device-level BACnet object discovery."""
 
     input: BACnetObjectsDiscoveryInput
+    data: list[BACnetObject]
+    timings: BACnetScanTimings
+    success: bool
+    error: str | None = None
+
+
+@dataclass(slots=True)
+class BACnetReadInput:
+    """Inputs for BACnet point value reading."""
+
+    device: BACnetDeviceIdentifier
+    points: list[BACnetObjectIdentifier]
+    client_ip: str | None = None
+    bbmd_ip: str | None = None
+
+
+@dataclass(slots=True)
+class BACnetReadResult:
+    """Result wrapper for BACnet point value reading."""
+
+    input: BACnetReadInput
     data: list[BACnetObject]
     timings: BACnetScanTimings
     success: bool

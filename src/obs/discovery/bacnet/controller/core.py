@@ -12,11 +12,12 @@ from typing import Any
 from .census import CensusMixin
 from .network_scan import NetworkScanMixin
 from .object_scan import ObjectScanMixin
+from .read import ReadMixin
 
 logger = logging.getLogger(__name__)
 
 
-class BACnetController(NetworkScanMixin, CensusMixin, ObjectScanMixin):
+class BACnetController(NetworkScanMixin, CensusMixin, ObjectScanMixin, ReadMixin):
     """Singleton BAC0 wrapper for all BACnet operations."""
 
     def __init__(
