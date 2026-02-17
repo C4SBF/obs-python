@@ -22,8 +22,12 @@ from .types import (
     DiscoveryObjectsInput,
     DiscoveryObjectsResult,
     EntityKind,
+    Point,
     Protocol,
     ProtocolRef,
+    ReadPointsData,
+    ReadPointsInput,
+    ReadPointsResult,
 )
 
 __all__ = [
@@ -33,6 +37,8 @@ __all__ = [
     "discover_objects_sync",
     "full_scan",
     "full_scan_sync",
+    "read_points",
+    "read_points_sync",
 ]
 
 logger = logging.getLogger(__name__)
@@ -540,4 +546,166 @@ def full_scan_sync(
             **kwargs,
         ),
         timeout=600,
+    )
+
+
+async def read_points(
+    device: str,
+    points: list[tuple[str, int]],
+    *,
+    network: str | None = None,
+    strict: bool = False,
+    **kwargs: Any,
+) -> ReadPointsResult:
+    """Read current values from device points.
+
+    Args:
+        device: Device identifier in format protocol://address#device_id
+            (e.g., "bacnet://192.168.1.100#1234").
+        points: List of (object_type, instance) tuples to read.
+        network: Optional network specification.
+        strict: If True, raise on resolution failures.
+        **kwargs: Additional protocol-specific options (client_ip, bbmd_ip, etc.)
+
+    Returns:
+        ReadPointsResult with list of Point objects containing current values.
+    """
+    started = utc_now()
+
+    input_data = ReadPointsInput(
+        device=device,
+        points=points,
+        network=network,
+        strict=strict,
+        metadata=dict(kwargs),
+    )
+
+    try:
+        resolved_network = _resolve_network(network, strict=strict)
+    except RuntimeError as exc:
+        finished = utc_now()
+        detail = _error("network_resolution_failed", str(exc), device=device)
+        return ReadPointsResult(
+            input=input_data,
+            data=ReadPointsData(points=[]),
+            timings=timings(started, finished),
+            success=False,
+            errors=[detail.message],
+            error_details=[detail],
+            metadata=scan_context(client_ip=None),
+        )
+
+    provided_client_ip = kwargs.get("client_ip")
+    try:
+        default_client_ip = _resolve_client_ip(
+            client_ip=provided_client_ip, strict=strict
+        )
+    except RuntimeError as exc:
+        finished = utc_now()
+        detail = _error("client_ip_resolution_failed", str(exc), device=device)
+        return ReadPointsResult(
+            input=input_data,
+            data=ReadPointsData(points=[]),
+            timings=timings(started, finished),
+            success=False,
+            errors=[detail.message],
+            error_details=[detail],
+            metadata=scan_context(client_ip=None),
+        )
+
+    errors: list[str] = []
+    error_details: list[DiscoveryError] = []
+
+    try:
+        protocol, address, device_id = parse_device_identifier(device)
+    except ValueError as exc:
+        finished = utc_now()
+        return ReadPointsResult(
+            input=input_data,
+            data=ReadPointsData(points=[]),
+            timings=timings(started, finished),
+            success=False,
+            errors=[str(exc)],
+            error_details=[
+                _error("invalid_device_identifier", str(exc), device=device)
+            ],
+            metadata=scan_context(client_ip=default_client_ip),
+        )
+
+    client_ip = (
+        provided_client_ip
+        if provided_client_ip
+        else _resolve_client_ip(client_ip=None, device_address=address, strict=strict)
+    )
+
+    read_points_list: list[Point] = []
+
+    try:
+        if protocol == Protocol.BACNET:
+            from .bacnet.scan import read_bacnet_points
+
+            raw_result = await read_bacnet_points(
+                address,
+                int(device_id),
+                points,
+                client_ip=client_ip,
+                **{k: v for k, v in kwargs.items() if k != "client_ip"},
+            )
+            if not raw_result.success:
+                message = raw_result.error or "BACnet point read failed"
+                errors.append(message)
+                error_details.append(
+                    _error(
+                        "protocol_read_failed",
+                        message,
+                        protocol=protocol.value,
+                        device=device,
+                    )
+                )
+
+            # Convert BACnetObject to Point
+            read_points_list = [
+                bacnet_object_to_point(obj, network=resolved_network)
+                for obj in raw_result.data
+            ]
+        else:
+            raise ValueError(f"Unsupported protocol: {protocol}")
+    except (RuntimeError, ValueError, TypeError, AttributeError) as exc:
+        errors.append(str(exc))
+        error_details.append(
+            _error(
+                "read_error",
+                str(exc),
+                protocol=protocol.value,
+                device=device,
+            )
+        )
+
+    finished = utc_now()
+
+    return ReadPointsResult(
+        input=input_data,
+        data=ReadPointsData(points=read_points_list),
+        timings=timings(started, finished),
+        success=not errors,
+        errors=errors,
+        error_details=error_details,
+        metadata=scan_context(client_ip=client_ip),
+    )
+
+
+def read_points_sync(
+    device: str,
+    points: list[tuple[str, int]],
+    *,
+    network: str | None = None,
+    strict: bool = False,
+    **kwargs: Any,
+) -> ReadPointsResult:
+    """Synchronous wrapper for read_points()."""
+    from .bacnet._loop import run_sync
+
+    return run_sync(
+        read_points(device, points, network=network, strict=strict, **kwargs),
+        timeout=60,
     )
