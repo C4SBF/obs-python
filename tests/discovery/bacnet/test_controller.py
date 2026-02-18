@@ -1145,14 +1145,15 @@ def test_read_point_initializes_when_needed(monkeypatch) -> None:
     controller.bacnet = Mock()
     controller.bacnet.read = AsyncMock(side_effect=[42.0, "Name", 62])
     controller._initialized = False
-    monkeypatch.setattr(controller, "initialize", AsyncMock(return_value=True))
+    mock_initialize = AsyncMock(return_value=True)
+    monkeypatch.setattr(controller, "initialize", mock_initialize)
 
     # when
     result = asyncio.run(controller.read_point("1.2.3.4", 10, "analogInput", 1))
 
     # then
     assert result is not None
-    controller.initialize.assert_awaited_once()
+    mock_initialize.assert_awaited_once()
 
 
 def test_read_point_raises_when_bacnet_none(monkeypatch) -> None:
@@ -1336,7 +1337,8 @@ def test_read_points_initializes_when_needed(monkeypatch) -> None:
     controller = BACnetController(client_ip="1.1.1.1/24")
     controller.bacnet = Mock()
     controller._initialized = False
-    monkeypatch.setattr(controller, "initialize", AsyncMock(return_value=True))
+    mock_initialize = AsyncMock(return_value=True)
+    monkeypatch.setattr(controller, "initialize", mock_initialize)
     monkeypatch.setattr(
         controller, "read_multiple", AsyncMock(return_value={"analogValue:1": {}})
     )
@@ -1346,7 +1348,7 @@ def test_read_points_initializes_when_needed(monkeypatch) -> None:
 
     # then
     assert len(result) == 1
-    controller.initialize.assert_awaited_once()
+    mock_initialize.assert_awaited_once()
 
 
 def test_read_points_raises_when_bacnet_none(monkeypatch) -> None:
