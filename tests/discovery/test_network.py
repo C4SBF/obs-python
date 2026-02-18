@@ -33,12 +33,24 @@ def test_auto_detect_client_ip_prefers_route_lookup(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(network_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(
+        network_module,
+        "_detect_interfaces",
+        lambda: [
+            network_module._InterfaceInfo(
+                iface="en0",
+                ip="10.0.0.2",
+                cidr="10.0.0.2/22",  # non-/24 to verify lookup
+                method="ip_addr",
+            )
+        ],
+    )
 
     # when
     client_ip = network_module.auto_detect_client_ip("10.0.0.9")
 
     # then
-    assert client_ip == "10.0.0.2/24"
+    assert client_ip == "10.0.0.2/22"
 
 
 def test_auto_detect_client_ip_falls_back_to_detected_interfaces(monkeypatch) -> None:
