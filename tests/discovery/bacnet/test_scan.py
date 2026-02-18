@@ -127,3 +127,99 @@ def test_discover_bacnet_objects_sync_uses_run_sync(monkeypatch) -> None:
 
     # then
     assert result is expected
+
+
+class StubReadController:
+    def __init__(self, initialized: bool = False):
+        self._initialized = initialized
+        self.initialize = AsyncMock(return_value=True)
+        self.read_points = AsyncMock(return_value=[])
+
+
+def test_read_bacnet_points_success(monkeypatch) -> None:
+    # given
+    controller = StubReadController(initialized=False)
+    point = make_bacnet_object(object_type="analogValue", instance=5, value=72.5)
+    controller.read_points.return_value = [point]
+    monkeypatch.setattr(scan_module, "get_bacnet_controller", lambda **_: controller)
+
+    # when
+    result = asyncio.run(
+        scan_module.read_bacnet_points(
+            "192.168.1.10",
+            1001,
+            [("analogValue", 5)],
+            timeout=15.0,
+        )
+    )
+
+    # then
+    assert result.success is True
+    assert result.error is None
+    assert result.data == [point]
+    assert result.input.device == BACnetDeviceIdentifier(
+        address="192.168.1.10",
+        device_id=1001,
+    )
+    assert result.input.points == [
+        BACnetObjectIdentifier(object_type="analogValue", instance=5)
+    ]
+    controller.initialize.assert_awaited_once()
+    controller.read_points.assert_awaited_once_with(
+        "192.168.1.10", 1001, [("analogValue", 5)], timeout=15.0
+    )
+
+
+def test_read_bacnet_points_filters_none_results(monkeypatch) -> None:
+    # given
+    controller = StubReadController(initialized=True)
+    point = make_bacnet_object()
+    controller.read_points.return_value = [point, None, None]
+    monkeypatch.setattr(scan_module, "get_bacnet_controller", lambda **_: controller)
+
+    # when
+    result = asyncio.run(
+        scan_module.read_bacnet_points("192.168.1.10", 1001, [("analogInput", 1)])
+    )
+
+    # then
+    assert result.success is True
+    assert len(result.data) == 1
+    assert result.data[0] == point
+
+
+def test_read_bacnet_points_error(monkeypatch) -> None:
+    # given
+    controller = StubReadController(initialized=True)
+    controller.read_points.side_effect = RuntimeError("read failed")
+    monkeypatch.setattr(scan_module, "get_bacnet_controller", lambda **_: controller)
+
+    # when
+    result = asyncio.run(
+        scan_module.read_bacnet_points("1.2.3.4", 7, [("analogValue", 1)])
+    )
+
+    # then
+    assert result.success is False
+    assert result.data == []
+    assert result.error == "read failed"
+
+
+def test_read_bacnet_points_sync_uses_run_sync(monkeypatch) -> None:
+    # given
+    expected = object()
+
+    def _fake_run_sync(coro, *, timeout):
+        coro.close()
+        assert timeout == 60.0
+        return expected
+
+    monkeypatch.setattr(scan_module, "run_sync", _fake_run_sync)
+
+    # when
+    result = scan_module.read_bacnet_points_sync(
+        "1.2.3.4", 44, [("analogInput", 1)], timeout=30.0
+    )
+
+    # then
+    assert result is expected

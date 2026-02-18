@@ -1111,3 +1111,333 @@ def test_clear_controller_cache_outer_exception_branch(monkeypatch) -> None:
 
     # then
     assert controller_module._bacnet_controller is None
+
+
+# --- ReadMixin tests ---
+
+
+def test_read_point_success(
+    initialized_controller: BACnetController, bacnet_mock: Mock
+) -> None:
+    # given
+    bacnet_mock.read = AsyncMock(side_effect=[72.5, "Zone Temp", 62])
+
+    # when
+    result = asyncio.run(
+        initialized_controller.read_point(
+            "192.168.1.10", 1001, "analogValue", 1, timeout=5.0
+        )
+    )
+
+    # then
+    assert result is not None
+    assert result.value == 72.5
+    assert result.name == "Zone Temp"
+    assert result.units == "62"
+    assert result.object_identifier.object_type == "analogValue"
+    assert result.object_identifier.instance == 1
+    assert result.metadata == {"source": "read_point"}
+
+
+def test_read_point_initializes_when_needed(monkeypatch) -> None:
+    # given
+    controller = BACnetController(client_ip="1.1.1.1/24")
+    controller.bacnet = Mock()
+    controller.bacnet.read = AsyncMock(side_effect=[42.0, "Name", 62])
+    controller._initialized = False
+    monkeypatch.setattr(controller, "initialize", AsyncMock(return_value=True))
+
+    # when
+    result = asyncio.run(controller.read_point("1.2.3.4", 10, "analogInput", 1))
+
+    # then
+    assert result is not None
+    controller.initialize.assert_awaited_once()
+
+
+def test_read_point_raises_when_bacnet_none(monkeypatch) -> None:
+    # given
+    controller = BACnetController(client_ip="1.1.1.1/24")
+    controller._initialized = False
+    controller.bacnet = None
+    monkeypatch.setattr(controller, "initialize", AsyncMock(return_value=True))
+
+    # when / then
+    try:
+        asyncio.run(controller.read_point("1.2.3.4", 10, "analogInput", 1))
+        assert False, "Expected RuntimeError"
+    except RuntimeError as exc:
+        assert "not initialized" in str(exc)
+
+
+def test_read_point_unlocked_returns_none_on_error(
+    initialized_controller: BACnetController, bacnet_mock: Mock
+) -> None:
+    # given
+    bacnet_mock.read = AsyncMock(side_effect=RuntimeError("read failed"))
+
+    # when
+    result = asyncio.run(
+        initialized_controller._read_point_unlocked(
+            "192.168.1.10", 1001, "analogValue", 1
+        )
+    )
+
+    # then
+    assert result is None
+
+
+def test_read_point_unlocked_handles_optional_property_failures(
+    initialized_controller: BACnetController, bacnet_mock: Mock
+) -> None:
+    # given
+    # presentValue succeeds, name fails, units fails
+    bacnet_mock.read = AsyncMock(
+        side_effect=[55.0, RuntimeError("no name"), RuntimeError("no units")]
+    )
+
+    # when
+    result = asyncio.run(
+        initialized_controller._read_point_unlocked(
+            "192.168.1.10", 1001, "analogValue", 1
+        )
+    )
+
+    # then
+    assert result is not None
+    assert result.value == 55.0
+    assert result.name is None
+    assert result.units is None
+
+
+def test_read_point_unlocked_skips_units_for_binary(
+    initialized_controller: BACnetController, bacnet_mock: Mock
+) -> None:
+    # given
+    bacnet_mock.read = AsyncMock(side_effect=[True, "Binary Point"])
+
+    # when
+    result = asyncio.run(
+        initialized_controller._read_point_unlocked(
+            "192.168.1.10", 1001, "binaryInput", 1
+        )
+    )
+
+    # then
+    assert result is not None
+    assert result.value is True
+    assert result.units is None
+    # Only 2 reads: presentValue and objectName (no units for binary)
+    assert bacnet_mock.read.await_count == 2
+
+
+def test_read_points_with_rpm_success(
+    initialized_controller: BACnetController, monkeypatch
+) -> None:
+    # given
+    rpm_result = {
+        "analogValue:1": {
+            "presentValue": 72.5,
+            "objectName": "Zone Temp",
+            "units": 62,
+        },
+        "analogValue:2": {
+            "presentValue": 45.0,
+            "objectName": "Setpoint",
+            "units": 62,
+        },
+    }
+    monkeypatch.setattr(
+        initialized_controller, "read_multiple", AsyncMock(return_value=rpm_result)
+    )
+
+    # when
+    result = asyncio.run(
+        initialized_controller.read_points(
+            "192.168.1.10", 1001, [("analogValue", 1), ("analogValue", 2)]
+        )
+    )
+
+    # then
+    assert len(result) == 2
+    assert result[0] is not None
+    assert result[0].value == 72.5
+    assert result[0].name == "Zone Temp"
+    assert result[0].metadata == {"source": "rpm_read"}
+    assert result[1] is not None
+    assert result[1].value == 45.0
+
+
+def test_read_points_falls_back_to_individual_on_rpm_failure(
+    initialized_controller: BACnetController, monkeypatch, bacnet_mock: Mock
+) -> None:
+    # given
+    monkeypatch.setattr(
+        initialized_controller, "read_multiple", AsyncMock(return_value=None)
+    )
+    # _read_point_unlocked reads: presentValue, objectName, units
+    bacnet_mock.read = AsyncMock(side_effect=[72.5, "Zone Temp", 62])
+
+    # when
+    result = asyncio.run(
+        initialized_controller.read_points("192.168.1.10", 1001, [("analogValue", 1)])
+    )
+
+    # then
+    assert len(result) == 1
+    assert result[0] is not None
+    assert result[0].value == 72.5
+
+
+def test_read_points_falls_back_for_missing_rpm_keys(
+    initialized_controller: BACnetController, monkeypatch, bacnet_mock: Mock
+) -> None:
+    # given
+    # RPM returns only one point, other is missing
+    rpm_result = {
+        "analogValue:1": {
+            "presentValue": 72.5,
+            "objectName": "Zone Temp",
+            "units": 62,
+        },
+    }
+    monkeypatch.setattr(
+        initialized_controller, "read_multiple", AsyncMock(return_value=rpm_result)
+    )
+    bacnet_mock.read = AsyncMock(side_effect=[45.0, "Setpoint", 62])
+
+    # when
+    result = asyncio.run(
+        initialized_controller.read_points(
+            "192.168.1.10", 1001, [("analogValue", 1), ("analogValue", 2)]
+        )
+    )
+
+    # then
+    assert len(result) == 2
+    assert result[0] is not None
+    assert result[0].value == 72.5
+    assert result[1] is not None
+    assert result[1].value == 45.0  # From fallback
+
+
+def test_read_points_returns_empty_for_empty_input(
+    initialized_controller: BACnetController,
+) -> None:
+    # given / when
+    result = asyncio.run(initialized_controller.read_points("192.168.1.10", 1001, []))
+
+    # then
+    assert result == []
+
+
+def test_read_points_initializes_when_needed(monkeypatch) -> None:
+    # given
+    controller = BACnetController(client_ip="1.1.1.1/24")
+    controller.bacnet = Mock()
+    controller._initialized = False
+    monkeypatch.setattr(controller, "initialize", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        controller, "read_multiple", AsyncMock(return_value={"analogValue:1": {}})
+    )
+
+    # when
+    result = asyncio.run(controller.read_points("1.2.3.4", 10, [("analogValue", 1)]))
+
+    # then
+    assert len(result) == 1
+    controller.initialize.assert_awaited_once()
+
+
+def test_read_points_raises_when_bacnet_none(monkeypatch) -> None:
+    # given
+    controller = BACnetController(client_ip="1.1.1.1/24")
+    controller._initialized = False
+    controller.bacnet = None
+    monkeypatch.setattr(controller, "initialize", AsyncMock(return_value=True))
+
+    # when / then
+    try:
+        asyncio.run(controller.read_points("1.2.3.4", 10, [("analogValue", 1)]))
+        assert False, "Expected RuntimeError"
+    except RuntimeError as exc:
+        assert "not initialized" in str(exc)
+
+
+def test_read_points_handles_normalized_rpm_keys(
+    initialized_controller: BACnetController, monkeypatch
+) -> None:
+    # given
+    # RPM returns with hyphenated key format
+    rpm_result = {
+        "analog-value:1": {
+            "presentValue": 72.5,
+            "objectName": "Zone Temp",
+            "units": 62,
+        },
+    }
+    monkeypatch.setattr(
+        initialized_controller, "read_multiple", AsyncMock(return_value=rpm_result)
+    )
+
+    # when
+    result = asyncio.run(
+        initialized_controller.read_points("192.168.1.10", 1001, [("analogValue", 1)])
+    )
+
+    # then
+    assert len(result) == 1
+    assert result[0] is not None
+    assert result[0].value == 72.5
+
+
+def test_build_read_result(initialized_controller: BACnetController) -> None:
+    # given
+    props = {
+        "presentValue": 72.5,
+        "objectName": "Zone Temp",
+        "units": 62,
+    }
+
+    # when
+    result = initialized_controller._build_read_result(
+        device_address="192.168.1.10",
+        device_id=1001,
+        object_type="analogValue",
+        instance=1,
+        props=props,
+    )
+
+    # then
+    assert result.uid == "bacnet://192.168.1.10/1001/analogValue:1"
+    assert result.value == 72.5
+    assert result.name == "Zone Temp"
+    assert result.units == "62"
+    assert result.unit_id == "62"
+    assert result.device.address == "192.168.1.10"
+    assert result.device.device_id == 1001
+    assert result.object_identifier.object_type == "analogValue"
+    assert result.object_identifier.instance == 1
+    assert result.metadata == {"source": "rpm_read"}
+
+
+def test_build_read_result_handles_none_values(
+    initialized_controller: BACnetController,
+) -> None:
+    # given
+    props = {"presentValue": None, "objectName": None, "units": None}
+
+    # when
+    result = initialized_controller._build_read_result(
+        device_address="192.168.1.10",
+        device_id=1001,
+        object_type="binaryInput",
+        instance=1,
+        props=props,
+    )
+
+    # then
+    assert result.value is None
+    assert result.name is None
+    assert result.units is None
+    assert result.unit_id is None
