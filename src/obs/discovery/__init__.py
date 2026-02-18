@@ -15,6 +15,8 @@ from .scan import (
     discover_objects_sync,
     full_scan,
     full_scan_sync,
+    read_points,
+    read_points_sync,
     scan_network,
     scan_network_sync,
 )
@@ -22,6 +24,7 @@ from .types import (
     DiscoveryFullScanResult,
     DiscoveryNetworkScanResult,
     DiscoveryObjectsResult,
+    ReadPointsResult,
 )
 
 __all__ = [
@@ -32,6 +35,9 @@ __all__ = [
     "discover_objects_sync",
     "full_scan",
     "full_scan_sync",
+    # Read functions
+    "read_points",
+    "read_points_sync",
     # Graph types
     "Node",
     "Edge",
@@ -46,4 +52,5 @@ __all__ = [
     "DiscoveryNetworkScanResult",
     "DiscoveryObjectsResult",
     "DiscoveryFullScanResult",
+    "ReadPointsResult",
 ]

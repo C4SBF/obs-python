@@ -281,3 +281,189 @@ def test_scan_context_reads_library_version_from_source(monkeypatch) -> None:
     # then
     assert context["library_version"] == "0.2.0"
     assert context["client_ip"] == "10.0.0.2/24"
+
+
+# --- read_points tests ---
+
+
+def test_read_points_success(monkeypatch) -> None:
+    # given
+    captured: dict[str, str] = {}
+    raw_obj = FakeRawBACnetObject(
+        uid="bacnet://192.168.1.10/1001/analogValue:1",
+        object_identifier=FakeRawObjectIdentifier(
+            object_type="analogValue", instance=1
+        ),
+        device=FakeRawDeviceIdentifier(address="192.168.1.10", device_id=1001),
+        value=72.5,
+    )
+
+    def _fake_auto_detect(device_address: str | None = None) -> str:
+        captured["route_for"] = device_address or ""
+        return "192.168.1.2/24"
+
+    async def _fake_read_bacnet_points(address, device_id, points, **kwargs):
+        captured["address"] = address
+        captured["device_id"] = str(device_id)
+        captured["client_ip"] = kwargs.get("client_ip", "")
+        return SimpleNamespace(success=True, error=None, data=[raw_obj])
+
+    monkeypatch.setattr(scan_module, "auto_detect_client_ip", _fake_auto_detect)
+    monkeypatch.setattr(
+        "obs.discovery.bacnet.scan.read_bacnet_points",
+        _fake_read_bacnet_points,
+    )
+
+    # when
+    result = asyncio.run(
+        scan_module.read_points(
+            "bacnet://192.168.1.10#1001",
+            [("analogValue", 1)],
+            network="192.168.1.0/24",
+        )
+    )
+
+    # then
+    assert result.success is True
+    assert captured["route_for"] == "192.168.1.10"
+    assert captured["address"] == "192.168.1.10"
+    assert captured["device_id"] == "1001"
+    assert captured["client_ip"] == "192.168.1.2/24"
+    assert len(result.data.points) == 1
+    assert result.data.points[0].value == 72.5
+
+
+def test_read_points_returns_error_for_invalid_identifier() -> None:
+    # given
+    invalid_device = "not-a-valid-identifier"
+
+    # when
+    result = asyncio.run(scan_module.read_points(invalid_device, [("analogValue", 1)]))
+
+    # then
+    assert result.success is False
+    assert result.data.points == []
+    assert result.errors
+    assert result.error_details[0].code == "invalid_device_identifier"
+
+
+def test_read_points_returns_error_on_network_resolution_failure(monkeypatch) -> None:
+    # given
+    monkeypatch.setattr(
+        scan_module,
+        "detect_local_network",
+        lambda: (_ for _ in ()).throw(RuntimeError("no net")),
+    )
+
+    # when
+    result = asyncio.run(
+        scan_module.read_points(
+            "bacnet://192.168.1.10#1001",
+            [("analogValue", 1)],
+            strict=True,
+        )
+    )
+
+    # then
+    assert result.success is False
+    assert result.error_details[0].code == "network_resolution_failed"
+
+
+def test_read_points_returns_error_on_client_ip_resolution_failure(monkeypatch) -> None:
+    # given
+    monkeypatch.setattr(scan_module, "detect_local_network", lambda: "192.168.1.0/24")
+    monkeypatch.setattr(
+        scan_module,
+        "auto_detect_client_ip",
+        lambda *_: (_ for _ in ()).throw(RuntimeError("no ip")),
+    )
+
+    # when
+    result = asyncio.run(
+        scan_module.read_points(
+            "bacnet://192.168.1.10#1001",
+            [("analogValue", 1)],
+            strict=True,
+        )
+    )
+
+    # then
+    assert result.success is False
+    assert result.error_details[0].code == "client_ip_resolution_failed"
+
+
+def test_read_points_handles_protocol_read_failure(monkeypatch) -> None:
+    # given
+    monkeypatch.setattr(
+        scan_module, "auto_detect_client_ip", lambda *_: "192.168.1.2/24"
+    )
+
+    async def _fake_read_bacnet_points(address, device_id, points, **kwargs):
+        return SimpleNamespace(success=False, error="device timeout", data=[])
+
+    monkeypatch.setattr(
+        "obs.discovery.bacnet.scan.read_bacnet_points",
+        _fake_read_bacnet_points,
+    )
+
+    # when
+    result = asyncio.run(
+        scan_module.read_points(
+            "bacnet://192.168.1.10#1001",
+            [("analogValue", 1)],
+        )
+    )
+
+    # then
+    assert result.success is False
+    assert "device timeout" in result.errors[0]
+    assert result.error_details[0].code == "protocol_read_failed"
+
+
+def test_read_points_handles_exception_during_read(monkeypatch) -> None:
+    # given
+    monkeypatch.setattr(
+        scan_module, "auto_detect_client_ip", lambda *_: "192.168.1.2/24"
+    )
+
+    async def _fake_read_bacnet_points(address, device_id, points, **kwargs):
+        raise RuntimeError("connection lost")
+
+    monkeypatch.setattr(
+        "obs.discovery.bacnet.scan.read_bacnet_points",
+        _fake_read_bacnet_points,
+    )
+
+    # when
+    result = asyncio.run(
+        scan_module.read_points(
+            "bacnet://192.168.1.10#1001",
+            [("analogValue", 1)],
+        )
+    )
+
+    # then
+    assert result.success is False
+    assert "connection lost" in result.errors[0]
+    assert result.error_details[0].code == "read_error"
+
+
+def test_read_points_sync_wrapper(monkeypatch) -> None:
+    # given
+    expected = object()
+
+    def _fake_run_sync(coro, *, timeout):
+        coro.close()
+        assert timeout == 60
+        return expected
+
+    monkeypatch.setattr("obs.discovery.bacnet._loop.run_sync", _fake_run_sync)
+
+    # when
+    result = scan_module.read_points_sync(
+        "bacnet://192.168.1.10#1001",
+        [("analogValue", 1)],
+    )
+
+    # then
+    assert result is expected

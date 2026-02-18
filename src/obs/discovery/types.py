@@ -23,6 +23,9 @@ __all__ = [
     "DiscoveryNetworkScanResult",
     "DiscoveryObjectsResult",
     "DiscoveryFullScanResult",
+    "ReadPointsInput",
+    "ReadPointsData",
+    "ReadPointsResult",
 ]
 
 
@@ -159,6 +162,37 @@ class DiscoveryObjectsResult:
 class DiscoveryFullScanResult:
     input: DiscoveryFullScanInput
     data: DiscoveryFullScanData
+    timings: DiscoveryScanTimings
+    success: bool
+    errors: list[str] = field(default_factory=list)
+    error_details: list[DiscoveryError] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ReadPointsInput:
+    """Input for point value reading."""
+
+    device: str
+    points: list[tuple[str, int]]
+    network: str | None = None
+    strict: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ReadPointsData:
+    """Data returned from point reading."""
+
+    points: list[Point]
+
+
+@dataclass(slots=True)
+class ReadPointsResult:
+    """Result wrapper for point value reading."""
+
+    input: ReadPointsInput
+    data: ReadPointsData
     timings: DiscoveryScanTimings
     success: bool
     errors: list[str] = field(default_factory=list)
