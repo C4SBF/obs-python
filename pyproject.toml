@@ -42,9 +42,6 @@ ai = [
     "transformers>=4.35.0",
     "accelerate>=0.24.0",
 ]
-agentic = [
-    "smolagents[litellm]>=1.0.0",
-]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/obs"]
