@@ -61,57 +61,35 @@ class CensusMixin:
                 logger.debug("Error parsing RPM census result: %s", exc)
 
         if device_name is None:
-            try:
-                name = await asyncio.wait_for(
-                    self.bacnet.read(f"{device_address} device:{device_id} objectName"),
-                    timeout=5.0,
-                )
-                device_name = str(name) if name else None
-            except BACNET_ERRORS:
-                pass
+            name = await self._read_device_property(
+                device_address, device_id, "objectName", timeout=5.0
+            )
+            device_name = str(name) if name else None
 
         if vendor is None:
-            try:
-                vendor_name = await asyncio.wait_for(
-                    self.bacnet.read(f"{device_address} device:{device_id} vendorName"),
-                    timeout=5.0,
-                )
-                vendor = str(vendor_name) if vendor_name else None
-            except BACNET_ERRORS:
-                pass
+            vendor_name = await self._read_device_property(
+                device_address, device_id, "vendorName", timeout=5.0
+            )
+            vendor = str(vendor_name) if vendor_name else None
 
         if model is None:
-            try:
-                model_name = await asyncio.wait_for(
-                    self.bacnet.read(f"{device_address} device:{device_id} modelName"),
-                    timeout=5.0,
-                )
-                model = str(model_name) if model_name else None
-            except BACNET_ERRORS:
-                pass
+            model_name = await self._read_device_property(
+                device_address, device_id, "modelName", timeout=5.0
+            )
+            model = str(model_name) if model_name else None
 
         if firmware is None:
-            try:
-                firmware_revision = await asyncio.wait_for(
-                    self.bacnet.read(
-                        f"{device_address} device:{device_id} firmwareRevision"
-                    ),
-                    timeout=5.0,
-                )
-                firmware = str(firmware_revision) if firmware_revision else None
-            except BACNET_ERRORS:
-                pass
+            firmware_revision = await self._read_device_property(
+                device_address, device_id, "firmwareRevision", timeout=5.0
+            )
+            firmware = str(firmware_revision) if firmware_revision else None
 
         if not object_list:
-            try:
-                obj_list_raw = await asyncio.wait_for(
-                    self.bacnet.read(f"{device_address} device:{device_id} objectList"),
-                    timeout=10.0,
-                )
-                if obj_list_raw:
-                    object_list = self._parse_object_list(obj_list_raw)
-            except BACNET_ERRORS:
-                pass
+            obj_list_raw = await self._read_device_property(
+                device_address, device_id, "objectList", timeout=10.0
+            )
+            if obj_list_raw:
+                object_list = self._parse_object_list(obj_list_raw)
 
         identifier = BACnetDeviceIdentifier(address=device_address, device_id=device_id)
         return BACnetDevice(
@@ -169,6 +147,45 @@ class CensusMixin:
                 logger.debug("RPM failed for %s: %s", device_address, exc)
                 return None
             raise
+
+    async def _read_device_property(
+        self,
+        device_address: str,
+        device_id: int,
+        property_name: str,
+        *,
+        timeout: float,
+    ) -> Any | None:
+        """Try BAC0.read(); if it fails, fall back to direct bacpypes3 ReadProperty.
+
+        BAC0's read() requires a cached I-Am, so devices that don't respond to
+        Who-Is fail even on individual reads. The direct path sends a unicast
+        ReadProperty to the known address with no discovery handshake.
+        """
+        try:
+            value = await asyncio.wait_for(
+                self.bacnet.read(
+                    f"{device_address} device:{device_id} {property_name}"
+                ),
+                timeout=timeout,
+            )
+            if value is not None:
+                return value
+        except BACNET_ERRORS as exc:
+            logger.debug(
+                "BAC0 read of %s on %s failed (%s); trying direct ReadProperty",
+                property_name,
+                device_address,
+                exc,
+            )
+
+        return await self.direct_read_property(  # type: ignore[attr-defined]
+            device_address,
+            "device",
+            device_id,
+            property_name,
+            timeout=timeout,
+        )
 
     def _parse_object_list(self, object_list_raw: Any) -> list[BACnetObjectIdentifier]:
         parsed: list[BACnetObjectIdentifier] = []

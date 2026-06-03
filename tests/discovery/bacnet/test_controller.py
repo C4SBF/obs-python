@@ -200,6 +200,101 @@ def test_read_multiple_returns_none_when_bac0_iam_index_error(
     assert any("no I-Am response" in rec.message for rec in caplog.records)
 
 
+def test_direct_read_property_returns_value_via_bacpypes3_app(
+    initialized_controller: BACnetController, bacnet_mock: Mock
+) -> None:
+    # given — BAC0 exposes a bacpypes3 application via this_application.app.
+    bacpypes_app = Mock()
+    bacpypes_app.read_property = AsyncMock(return_value="DirectName")
+    bacnet_mock.this_application = Mock(app=bacpypes_app)
+
+    # when
+    result = asyncio.run(
+        initialized_controller.direct_read_property(
+            "1.2.3.4", "device", 42, "objectName"
+        )
+    )
+
+    # then
+    assert result == "DirectName"
+    assert bacpypes_app.read_property.await_count == 1
+
+
+def test_direct_read_property_returns_none_when_app_unavailable(
+    initialized_controller: BACnetController, bacnet_mock: Mock
+) -> None:
+    # given — no this_application attribute on the BAC0 handle.
+    bacnet_mock.this_application = None
+
+    # when
+    result = asyncio.run(
+        initialized_controller.direct_read_property(
+            "1.2.3.4", "device", 42, "objectName"
+        )
+    )
+
+    # then
+    assert result is None
+
+
+def test_direct_read_property_swallows_read_errors(
+    initialized_controller: BACnetController, bacnet_mock: Mock
+) -> None:
+    # given
+    bacpypes_app = Mock()
+    bacpypes_app.read_property = AsyncMock(side_effect=RuntimeError("no response"))
+    bacnet_mock.this_application = Mock(app=bacpypes_app)
+
+    # when
+    result = asyncio.run(
+        initialized_controller.direct_read_property(
+            "1.2.3.4", "device", 42, "objectName"
+        )
+    )
+
+    # then
+    assert result is None
+
+
+def test_direct_read_property_raises_when_not_initialized() -> None:
+    # given
+    controller = BACnetController(client_ip="1.1.1.1/24")
+    controller.bacnet = None
+
+    # when / then
+    try:
+        asyncio.run(
+            controller.direct_read_property("1.2.3.4", "device", 1, "objectName")
+        )
+        assert False, "Expected RuntimeError"
+    except RuntimeError as exc:
+        assert "not initialized" in str(exc)
+
+
+def test_census_uses_direct_read_when_bac0_read_fails(
+    initialized_controller: BACnetController, bacnet_mock: Mock
+) -> None:
+    # given — RPM crashes (IndexError), BAC0.read() also fails (I-Am cache empty),
+    # but the direct bacpypes3 ReadProperty returns values.
+    bacnet_mock.readMultiple.side_effect = IndexError("list index out of range")
+    bacnet_mock.read = AsyncMock(side_effect=RuntimeError("NoResponseFromController"))
+    bacpypes_app = Mock()
+    bacpypes_app.read_property = AsyncMock(
+        side_effect=["NameDirect", "VendorDirect", "ModelDirect", "1.2.3", []]
+    )
+    bacnet_mock.this_application = Mock(app=bacpypes_app)
+
+    # when
+    device = asyncio.run(initialized_controller.read_device_census("1.2.3.4", 42))
+
+    # then
+    assert device.name == "NameDirect"
+    assert device.vendor == "VendorDirect"
+    assert device.model == "ModelDirect"
+    assert device.firmware == "1.2.3"
+    assert bacpypes_app.read_property.await_count == 5
+
+
 def test_read_device_census_falls_back_when_rpm_hits_iam_index_error(
     initialized_controller: BACnetController, bacnet_mock: Mock
 ) -> None:
