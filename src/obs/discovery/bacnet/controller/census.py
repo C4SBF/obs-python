@@ -145,6 +145,17 @@ class CensusMixin:
             if isinstance(result, dict):
                 return result
             return None
+        except IndexError as exc:
+            # BAC0.readMultiple() needs an I-Am cached before sending RPM and
+            # indexes _iam[0]; devices that don't respond to Who-Is (e.g. Badger
+            # flow meters) raise IndexError here. Fall through so the caller can
+            # retry with per-property read(), which doesn't require I-Am.
+            logger.warning(
+                "RPM unavailable for %s (no I-Am response from device): %s",
+                device_address,
+                exc,
+            )
+            return None
         except Exception as exc:
             error_name = type(exc).__name__
             if error_name in (

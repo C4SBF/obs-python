@@ -178,6 +178,50 @@ def test_read_multiple_returns_none_on_exception(
     assert result is None
 
 
+def test_read_multiple_returns_none_when_bac0_iam_index_error(
+    initialized_controller: BACnetController, bacnet_mock: Mock, caplog
+) -> None:
+    # given — BAC0.readMultiple() indexes _iam[0] before sending RPM; devices
+    # that never reply to Who-Is (e.g. Badger flow meters) trigger IndexError.
+    bacnet_mock.readMultiple.side_effect = IndexError("list index out of range")
+
+    # when
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        result = asyncio.run(
+            initialized_controller.read_multiple(
+                "1.2.3.4", {"device:1": ["objectName"]}
+            )
+        )
+
+    # then
+    assert result is None
+    assert any("no I-Am response" in rec.message for rec in caplog.records)
+
+
+def test_read_device_census_falls_back_when_rpm_hits_iam_index_error(
+    initialized_controller: BACnetController, bacnet_mock: Mock
+) -> None:
+    # given — RPM fails with IndexError (no I-Am), but individual reads succeed.
+    bacnet_mock.readMultiple.side_effect = IndexError("list index out of range")
+    bacnet_mock.read = AsyncMock(
+        side_effect=["Badger-1", "Badger", "M-2000", "1.0", [("analogInput", 1)]]
+    )
+
+    # when
+    device = asyncio.run(initialized_controller.read_device_census("1.2.3.4", 42))
+
+    # then
+    assert device.name == "Badger-1"
+    assert device.vendor == "Badger"
+    assert device.model == "M-2000"
+    assert device.firmware == "1.0"
+    assert device.object_list == [
+        BACnetObjectIdentifier(object_type="analogInput", instance=1)
+    ]
+
+
 def test_read_multiple_returns_none_for_non_dict_result(
     initialized_controller: BACnetController, bacnet_mock: Mock
 ) -> None:
