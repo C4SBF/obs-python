@@ -10,13 +10,14 @@ from io import StringIO
 from typing import Any
 
 from .census import CensusMixin
+from .direct_read import DirectReadMixin
 from .network_scan import NetworkScanMixin
 from .object_scan import ObjectScanMixin
 
 logger = logging.getLogger(__name__)
 
 
-class BACnetController(NetworkScanMixin, CensusMixin, ObjectScanMixin):
+class BACnetController(NetworkScanMixin, CensusMixin, ObjectScanMixin, DirectReadMixin):
     """Singleton BAC0 wrapper for all BACnet operations."""
 
     def __init__(
