@@ -89,14 +89,45 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 # Install all dependencies (including AI extras for full test coverage)
 uv sync --extra network --extra ai
 
-# Set up pre-commit hooks
-pre-commit install
+# Set up pre-commit hooks (includes commit message validation)
+pre-commit install --hook-type pre-commit --hook-type commit-msg
 
 # Run tests
 uv run pytest
 
 # Run linters
 pre-commit run --all-files
+```
+
+### Commit Messages
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/) for automatic versioning and release notes. Commit messages are validated by pre-commit hooks.
+
+**Format:** `<type>: <description>`
+
+| Type       | Description             | Version Bump  |
+|------------|-------------------------|---------------|
+| `feat`     | New feature             | Minor (0.X.0) |
+| `fix`      | Bug fix                 | Patch (0.0.X) |
+| `perf`     | Performance improvement | Patch (0.0.X) |
+| `docs`     | Documentation only      | No release    |
+| `style`    | Code style (formatting) | No release    |
+| `refactor` | Code refactoring        | No release    |
+| `test`     | Adding/updating tests   | No release    |
+| `ci`       | CI/CD changes           | No release    |
+| `chore`    | Maintenance tasks       | No release    |
+| `build`    | Build system changes    | No release    |
+
+**Examples:**
+```bash
+git commit -m "feat: add BACnet point reading"
+git commit -m "fix: resolve network timeout on slow devices"
+git commit -m "docs: update installation instructions"
+```
+
+**Breaking changes:** Add `!` after the type or include `BREAKING CHANGE:` in the body for major version bumps (X.0.0):
+```bash
+git commit -m "feat!: redesign discovery API"
 ```
 
 ## License
