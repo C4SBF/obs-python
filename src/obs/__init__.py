@@ -13,16 +13,19 @@ from obs.discovery import (
     DiscoveryFullScanResult,
     DiscoveryNetworkScanResult,
     DiscoveryObjectsResult,
+    LocalDeviceIdentity,
     device_to_graph,
     discover_objects,
     discover_objects_sync,
     full_scan,
     full_scan_result_to_graph,
     full_scan_sync,
+    get_default_local_device_identity,
     network_scan_result_to_graph,
     objects_result_to_graph,
     scan_network,
     scan_network_sync,
+    set_default_local_device_identity,
 )
 from obs.graph import Edge, Graph, GraphMeta, Node
 from obs.llm import (
@@ -53,6 +56,10 @@ __all__ = [
     "DiscoveryNetworkScanResult",
     "DiscoveryObjectsResult",
     "DiscoveryFullScanResult",
+    # Local BACnet device identity
+    "LocalDeviceIdentity",
+    "set_default_local_device_identity",
+    "get_default_local_device_identity",
     # Graph conversion functions
     "device_to_graph",
     "network_scan_result_to_graph",

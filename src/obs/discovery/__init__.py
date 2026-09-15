@@ -1,5 +1,10 @@
 """Device discovery — protocol-agnostic scan API."""
 
+from .bacnet import (
+    LocalDeviceIdentity,
+    get_default_local_device_identity,
+    set_default_local_device_identity,
+)
 from .graph import (
     Edge,
     Graph,
@@ -32,6 +37,10 @@ __all__ = [
     "discover_objects_sync",
     "full_scan",
     "full_scan_sync",
+    # Local BACnet device identity
+    "LocalDeviceIdentity",
+    "set_default_local_device_identity",
+    "get_default_local_device_identity",
     # Graph types
     "Node",
     "Edge",

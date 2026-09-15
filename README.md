@@ -64,6 +64,40 @@ options = LLMOptions(backend="api", base_url="http://localhost:11434/v1", model=
 enhanced = enhance_graph_sync(classified.graph, options=options)
 ```
 
+### Local device identity
+
+The scanner is itself a BACnet device on the network. It answers Who-Is and
+exposes a Device Object that other devices and BMS tools can read. By default it
+announces BAC0's values: a random device instance that changes on every
+process start, and the name `"BAC0"`.
+
+Set an identity once at startup to say who you are. It applies to every
+controller created afterwards, including the ones `scan_network()` and
+`discover_objects()` create internally:
+
+```python
+import obs
+
+obs.set_default_local_device_identity(
+    obs.LocalDeviceIdentity(
+        device_id=1234567,          # must be unique on the BACnet internetwork
+        device_name="site-scanner-01",
+        model_name="my-scan-tool",
+        application_software_version="my-scan-tool 2.1.0",
+    )
+)
+
+result = obs.scan_network_sync()
+```
+
+All fields are optional. Leave a field `None` to keep the library default.
+`device_id` matters most: other devices address you by it, so pick a stable,
+unique value. Only set `vendor_id` / `vendor_name` to an identifier ASHRAE
+assigned to your organization.
+
+Callers that manage controllers directly can pass `identity=` to
+`get_bacnet_controller()` or `BACnetController()` instead.
+
 ### Async API
 
 All scan, classify, and enhance functions have async variants:

@@ -1,5 +1,10 @@
 """BACnet discovery package."""
 
+from .controller import (
+    get_default_local_device_identity,
+    set_default_local_device_identity,
+)
+from .identity import LocalDeviceIdentity
 from .scan import (
     discover_bacnet_objects,
     discover_bacnet_objects_sync,
@@ -23,6 +28,9 @@ __all__ = [
     "scan_bacnet_network_sync",
     "discover_bacnet_objects",
     "discover_bacnet_objects_sync",
+    "LocalDeviceIdentity",
+    "set_default_local_device_identity",
+    "get_default_local_device_identity",
     "BACnetDevice",
     "BACnetObject",
     "BACnetDeviceIdentifier",
