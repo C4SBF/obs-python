@@ -59,6 +59,13 @@ def set_default_local_device_identity(identity: LocalDeviceIdentity | None) -> N
     global _default_identity
     with _controller_lock:
         _default_identity = identity
+        if identity is not None and _bacnet_controllers:
+            logger.warning(
+                "Default local device identity set after %d controller(s) were "
+                "created; they keep their current identity. Call "
+                "clear_controller_cache() to recreate them with the new one.",
+                len(_bacnet_controllers),
+            )
 
 
 def get_default_local_device_identity() -> LocalDeviceIdentity | None:
@@ -163,7 +170,9 @@ def get_bacnet_controller(
                     f"a different local device identity: {cached.identity!r} "
                     f"vs requested {identity!r}. Set the identity before the "
                     "first get_bacnet_controller() call, for example with "
-                    "set_default_local_device_identity() at application startup."
+                    "set_default_local_device_identity() at application startup. "
+                    "To change it now, call clear_controller_cache() first; "
+                    "this disconnects the running BAC0 instance."
                 )
             return cached
 

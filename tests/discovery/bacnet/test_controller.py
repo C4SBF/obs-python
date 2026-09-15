@@ -1535,6 +1535,79 @@ def test_get_bacnet_controller_identity_after_anonymous_controller_raises(
         )
 
 
+def test_get_bacnet_controller_conflict_message_names_recovery_path(
+    monkeypatch,
+) -> None:
+    # given
+    monkeypatch.setattr(controller_module, "_bacnet_controller", None)
+    monkeypatch.setattr(controller_module, "_bacnet_controllers", {})
+    monkeypatch.setattr(controller_module, "_default_identity", None)
+    controller_module.get_bacnet_controller(client_ip="1.1.1.1/24")
+
+    # when / then
+    with pytest.raises(ValueError, match="clear_controller_cache"):
+        controller_module.get_bacnet_controller(
+            client_ip="1.1.1.1/24", identity=LocalDeviceIdentity(device_id=6)
+        )
+
+
+def test_initialize_warns_when_no_device_id(monkeypatch, caplog) -> None:
+    # given
+    controller = BACnetController(
+        client_ip="1.1.1.1/24", identity=LocalDeviceIdentity(device_name="named")
+    )
+    fake_bac0, _ = _fake_bac0_with_device_object()
+    monkeypatch.setitem(sys.modules, "BAC0", fake_bac0)
+    monkeypatch.setattr(
+        controller_module.asyncio, "sleep", AsyncMock(return_value=None)
+    )
+
+    # when
+    with caplog.at_level("WARNING"):
+        asyncio.run(controller.initialize())
+
+    # then
+    assert "No device_id set" in caplog.text
+
+
+def test_initialize_does_not_warn_when_device_id_set(monkeypatch, caplog) -> None:
+    # given
+    controller = BACnetController(
+        client_ip="1.1.1.1/24", identity=LocalDeviceIdentity(device_id=5)
+    )
+    fake_bac0, _ = _fake_bac0_with_device_object()
+    monkeypatch.setitem(sys.modules, "BAC0", fake_bac0)
+    monkeypatch.setattr(
+        controller_module.asyncio, "sleep", AsyncMock(return_value=None)
+    )
+
+    # when
+    with caplog.at_level("WARNING"):
+        asyncio.run(controller.initialize())
+
+    # then
+    assert "No device_id set" not in caplog.text
+
+
+def test_set_default_local_device_identity_warns_if_controllers_exist(
+    monkeypatch, caplog
+) -> None:
+    # given
+    monkeypatch.setattr(controller_module, "_bacnet_controller", None)
+    monkeypatch.setattr(controller_module, "_bacnet_controllers", {})
+    monkeypatch.setattr(controller_module, "_default_identity", None)
+    controller_module.get_bacnet_controller(client_ip="1.1.1.1/24")
+
+    # when
+    with caplog.at_level("WARNING"):
+        controller_module.set_default_local_device_identity(
+            LocalDeviceIdentity(device_id=5)
+        )
+
+    # then
+    assert "after 1 controller(s) were created" in caplog.text
+
+
 def test_set_default_local_device_identity_none_clears_it(monkeypatch) -> None:
     # given
     monkeypatch.setattr(controller_module, "_default_identity", None)

@@ -92,6 +92,16 @@ class BACnetController(NetworkScanMixin, CensusMixin, ObjectScanMixin, DirectRea
             kwargs["bbmdTTL"] = self.bbmd_ttl
         if self.identity is not None:
             kwargs.update(self.identity.bac0_lite_kwargs())
+        if "deviceId" not in kwargs:
+            # BAC0 picks 3056177 + random(0..1000). Other devices address this
+            # node by that number, so every restart looks like a new device to
+            # them. Worth a warning even though it is the historical default.
+            logger.warning(
+                "No device_id set; this BACnet device will announce a new random "
+                "device instance on every start. Set a stable one with "
+                "LocalDeviceIdentity(device_id=...) via "
+                "set_default_local_device_identity()."
+            )
         return kwargs
 
     def _apply_device_object_properties(self) -> None:
