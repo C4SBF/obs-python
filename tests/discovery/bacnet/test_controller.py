@@ -6,8 +6,10 @@ import sys
 import types
 from unittest.mock import AsyncMock, Mock
 
+import pytest
+
 import obs.discovery.bacnet.controller as controller_module
-from obs.discovery.bacnet.controller import BACnetController
+from obs.discovery.bacnet.controller import BACnetController, LocalDeviceIdentity
 from obs.discovery.bacnet.types import BACnetObjectIdentifier
 from tests.discovery.bacnet.factories import FakeWhoIsResponse
 
@@ -1250,3 +1252,313 @@ def test_clear_controller_cache_outer_exception_branch(monkeypatch) -> None:
 
     # then
     assert controller_module._bacnet_controller is None
+
+
+# --- local device identity ---------------------------------------------------
+
+
+def _fake_bac0_with_device_object() -> tuple[types.SimpleNamespace, Mock]:
+    """BAC0 stand-in whose lite() returns the this_application.app.device_object chain."""
+    device_object = Mock()
+    bacnet = Mock()
+    bacnet.this_application.app.device_object = device_object
+    fake_bac0 = types.SimpleNamespace(log_level=Mock(), lite=Mock(return_value=bacnet))
+    return fake_bac0, device_object
+
+
+def test_initialize_passes_identity_fields_bac0_honors_to_lite(monkeypatch) -> None:
+    # given
+    identity = LocalDeviceIdentity(
+        device_id=1234567,
+        device_name="scanner-01",
+        model_name="tool",
+        vendor_id=842,
+        vendor_name="Servisys, Inc.",
+    )
+    controller = BACnetController(client_ip="1.1.1.1/24", identity=identity)
+    fake_bac0, _ = _fake_bac0_with_device_object()
+    monkeypatch.setitem(sys.modules, "BAC0", fake_bac0)
+    monkeypatch.setattr(
+        controller_module.asyncio, "sleep", AsyncMock(return_value=None)
+    )
+
+    # when
+    result = asyncio.run(controller.initialize())
+
+    # then
+    assert result is True
+    assert fake_bac0.lite.call_args.kwargs == {
+        "ip": "1.1.1.1/24",
+        "port": 47808,
+        "deviceId": 1234567,
+        "localObjName": "scanner-01",
+        "modelName": "tool",
+        "vendorId": 842,
+    }
+
+
+def test_initialize_keeps_bbmd_kwargs_alongside_identity(monkeypatch) -> None:
+    # given
+    controller = BACnetController(
+        client_ip="1.1.1.1/24",
+        bbmd_ip="10.0.0.1",
+        bbmd_ttl=300,
+        identity=LocalDeviceIdentity(device_id=9),
+    )
+    fake_bac0, _ = _fake_bac0_with_device_object()
+    monkeypatch.setitem(sys.modules, "BAC0", fake_bac0)
+    monkeypatch.setattr(
+        controller_module.asyncio, "sleep", AsyncMock(return_value=None)
+    )
+
+    # when
+    asyncio.run(controller.initialize())
+
+    # then
+    kwargs = fake_bac0.lite.call_args.kwargs
+    assert kwargs["bbmdAddress"] == "10.0.0.1"
+    assert kwargs["bbmdTTL"] == 300
+    assert kwargs["deviceId"] == 9
+
+
+def test_initialize_without_identity_passes_only_transport_to_lite(monkeypatch) -> None:
+    # given
+    controller = BACnetController(client_ip="1.1.1.1/24")
+    fake_bac0, _ = _fake_bac0_with_device_object()
+    monkeypatch.setitem(sys.modules, "BAC0", fake_bac0)
+    monkeypatch.setattr(
+        controller_module.asyncio, "sleep", AsyncMock(return_value=None)
+    )
+
+    # when
+    asyncio.run(controller.initialize())
+
+    # then
+    assert fake_bac0.lite.call_args.kwargs == {"ip": "1.1.1.1/24", "port": 47808}
+
+
+def test_initialize_writes_remaining_fields_onto_device_object(monkeypatch) -> None:
+    # given
+    identity = LocalDeviceIdentity(
+        vendor_id=842,
+        vendor_name="Servisys, Inc.",
+        description="lab bench",
+        location="room 12",
+        firmware_revision="os 2.3.0",
+        application_software_version="tool 2.1.0",
+    )
+    controller = BACnetController(client_ip="1.1.1.1/24", identity=identity)
+    fake_bac0, device_object = _fake_bac0_with_device_object()
+    monkeypatch.setitem(sys.modules, "BAC0", fake_bac0)
+    monkeypatch.setattr(
+        controller_module.asyncio, "sleep", AsyncMock(return_value=None)
+    )
+
+    # when
+    asyncio.run(controller.initialize())
+
+    # then
+    assert device_object.vendorName == "Servisys, Inc."
+    assert device_object.description == "lab bench"
+    assert device_object.location == "room 12"
+    assert device_object.firmwareRevision == "os 2.3.0"
+    assert device_object.applicationSoftwareVersion == "tool 2.1.0"
+
+
+def test_initialize_defaults_application_software_version_to_library(
+    monkeypatch,
+) -> None:
+    # given
+    controller = BACnetController(client_ip="1.1.1.1/24")
+    fake_bac0, device_object = _fake_bac0_with_device_object()
+    monkeypatch.setitem(sys.modules, "BAC0", fake_bac0)
+    monkeypatch.setattr(
+        controller_module.asyncio, "sleep", AsyncMock(return_value=None)
+    )
+
+    # when
+    asyncio.run(controller.initialize())
+
+    # then
+    assert device_object.applicationSoftwareVersion.startswith("openbuildingstack")
+
+
+def test_initialize_caller_application_software_version_wins(monkeypatch) -> None:
+    # given
+    identity = LocalDeviceIdentity(application_software_version="tool 2.1.0")
+    controller = BACnetController(client_ip="1.1.1.1/24", identity=identity)
+    fake_bac0, device_object = _fake_bac0_with_device_object()
+    monkeypatch.setitem(sys.modules, "BAC0", fake_bac0)
+    monkeypatch.setattr(
+        controller_module.asyncio, "sleep", AsyncMock(return_value=None)
+    )
+
+    # when
+    asyncio.run(controller.initialize())
+
+    # then
+    assert device_object.applicationSoftwareVersion == "tool 2.1.0"
+
+
+def test_initialize_survives_unreachable_device_object(monkeypatch, caplog) -> None:
+    # given
+    controller = BACnetController(
+        client_ip="1.1.1.1/24", identity=LocalDeviceIdentity(description="x")
+    )
+    fake_bac0 = types.SimpleNamespace(
+        log_level=Mock(), lite=Mock(return_value=object())
+    )
+    monkeypatch.setitem(sys.modules, "BAC0", fake_bac0)
+    monkeypatch.setattr(
+        controller_module.asyncio, "sleep", AsyncMock(return_value=None)
+    )
+
+    # when
+    with caplog.at_level("WARNING"):
+        result = asyncio.run(controller.initialize())
+
+    # then
+    assert result is True
+    assert "Local Device Object not reachable" in caplog.text
+    assert "description" in caplog.text
+
+
+def test_initialize_survives_property_write_failure(monkeypatch, caplog) -> None:
+    # given
+    controller = BACnetController(
+        client_ip="1.1.1.1/24", identity=LocalDeviceIdentity(location="room 12")
+    )
+    fake_bac0, device_object = _fake_bac0_with_device_object()
+
+    class _RejectsLocation:
+        def __setattr__(self, name, value):
+            if name == "location":
+                raise TypeError("string expected")
+            object.__setattr__(self, name, value)
+
+    fake_bac0.lite.return_value.this_application.app.device_object = _RejectsLocation()
+    monkeypatch.setitem(sys.modules, "BAC0", fake_bac0)
+    monkeypatch.setattr(
+        controller_module.asyncio, "sleep", AsyncMock(return_value=None)
+    )
+
+    # when
+    with caplog.at_level("WARNING"):
+        result = asyncio.run(controller.initialize())
+
+    # then
+    assert result is True
+    assert "Could not set Device Object location" in caplog.text
+
+
+def test_get_bacnet_controller_uses_explicit_identity(monkeypatch) -> None:
+    # given
+    monkeypatch.setattr(controller_module, "_bacnet_controller", None)
+    monkeypatch.setattr(controller_module, "_bacnet_controllers", {})
+    monkeypatch.setattr(controller_module, "_default_identity", None)
+    identity = LocalDeviceIdentity(device_id=5)
+
+    # when
+    controller = controller_module.get_bacnet_controller(
+        client_ip="1.1.1.1/24", identity=identity
+    )
+
+    # then
+    assert controller.identity == identity
+
+
+def test_get_bacnet_controller_falls_back_to_default_identity(monkeypatch) -> None:
+    # given
+    monkeypatch.setattr(controller_module, "_bacnet_controller", None)
+    monkeypatch.setattr(controller_module, "_bacnet_controllers", {})
+    monkeypatch.setattr(controller_module, "_default_identity", None)
+    identity = LocalDeviceIdentity(device_id=5, device_name="from-default")
+    controller_module.set_default_local_device_identity(identity)
+
+    # when
+    controller = controller_module.get_bacnet_controller(client_ip="1.1.1.1/24")
+
+    # then
+    assert controller.identity == identity
+    assert controller_module.get_default_local_device_identity() == identity
+
+
+def test_get_bacnet_controller_same_identity_returns_cached(monkeypatch) -> None:
+    # given
+    monkeypatch.setattr(controller_module, "_bacnet_controller", None)
+    monkeypatch.setattr(controller_module, "_bacnet_controllers", {})
+    monkeypatch.setattr(controller_module, "_default_identity", None)
+    identity = LocalDeviceIdentity(device_id=5)
+
+    # when
+    first = controller_module.get_bacnet_controller(
+        client_ip="1.1.1.1/24", identity=identity
+    )
+    second = controller_module.get_bacnet_controller(
+        client_ip="1.1.1.1/24", identity=LocalDeviceIdentity(device_id=5)
+    )
+    third = controller_module.get_bacnet_controller(client_ip="1.1.1.1/24")
+
+    # then
+    assert first is second is third
+
+
+def test_get_bacnet_controller_conflicting_identity_raises(monkeypatch) -> None:
+    # given
+    monkeypatch.setattr(controller_module, "_bacnet_controller", None)
+    monkeypatch.setattr(controller_module, "_bacnet_controllers", {})
+    monkeypatch.setattr(controller_module, "_default_identity", None)
+    controller_module.get_bacnet_controller(
+        client_ip="1.1.1.1/24", identity=LocalDeviceIdentity(device_id=5)
+    )
+
+    # when / then
+    with pytest.raises(ValueError, match="different local device identity"):
+        controller_module.get_bacnet_controller(
+            client_ip="1.1.1.1/24", identity=LocalDeviceIdentity(device_id=6)
+        )
+
+
+def test_get_bacnet_controller_identity_after_anonymous_controller_raises(
+    monkeypatch,
+) -> None:
+    # given
+    monkeypatch.setattr(controller_module, "_bacnet_controller", None)
+    monkeypatch.setattr(controller_module, "_bacnet_controllers", {})
+    monkeypatch.setattr(controller_module, "_default_identity", None)
+    controller_module.get_bacnet_controller(client_ip="1.1.1.1/24")
+
+    # when / then
+    with pytest.raises(ValueError, match="set_default_local_device_identity"):
+        controller_module.get_bacnet_controller(
+            client_ip="1.1.1.1/24", identity=LocalDeviceIdentity(device_id=6)
+        )
+
+
+def test_set_default_local_device_identity_none_clears_it(monkeypatch) -> None:
+    # given
+    monkeypatch.setattr(controller_module, "_default_identity", None)
+    controller_module.set_default_local_device_identity(
+        LocalDeviceIdentity(device_id=5)
+    )
+
+    # when
+    controller_module.set_default_local_device_identity(None)
+
+    # then
+    assert controller_module.get_default_local_device_identity() is None
+
+
+def test_clear_controller_cache_keeps_default_identity(monkeypatch) -> None:
+    # given
+    monkeypatch.setattr(controller_module, "_bacnet_controller", None)
+    monkeypatch.setattr(controller_module, "_bacnet_controllers", {})
+    monkeypatch.setattr(controller_module, "_default_identity", None)
+    identity = LocalDeviceIdentity(device_id=5)
+    controller_module.set_default_local_device_identity(identity)
+
+    # when
+    controller_module.clear_controller_cache()
+
+    # then
+    assert controller_module.get_default_local_device_identity() == identity

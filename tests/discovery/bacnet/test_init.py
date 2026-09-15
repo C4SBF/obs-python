@@ -14,6 +14,9 @@ def test_init_exports_new_api_symbols() -> None:
         "BACnetObject",
         "BACnetNetworkScanResult",
         "BACnetObjectsDiscoveryResult",
+        "LocalDeviceIdentity",
+        "set_default_local_device_identity",
+        "get_default_local_device_identity",
     }
 
     # when
