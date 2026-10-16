@@ -96,6 +96,44 @@ def test_discover_objects_uses_route_aware_client_ip_fallback(monkeypatch) -> No
     assert len(result.data.device.points) == 1
 
 
+def test_discover_objects_keeps_schedules_out_of_points(monkeypatch) -> None:
+    # given — the caller opted in, so the BACnet layer returns schedules too.
+    def _raw(object_type: str, instance: int) -> FakeRawBACnetObject:
+        return FakeRawBACnetObject(
+            uid=f"bacnet://10.0.0.9/1001/{object_type}:{instance}",
+            object_identifier=FakeRawObjectIdentifier(
+                object_type=object_type, instance=instance
+            ),
+            device=FakeRawDeviceIdentifier(address="10.0.0.9", device_id=1001),
+        )
+
+    captured: dict[str, object] = {}
+
+    async def _fake_discover_bacnet_objects(address: str, device_id: int, **kwargs):
+        captured.update(kwargs)
+        data = [_raw("analogInput", 1), _raw("schedule", 0), _raw("calendar", 2)]
+        return SimpleNamespace(success=True, error=None, data=data)
+
+    monkeypatch.setattr(
+        "obs.discovery.bacnet.scan.discover_bacnet_objects",
+        _fake_discover_bacnet_objects,
+    )
+
+    # when
+    result = asyncio.run(
+        scan_module.discover_objects(
+            "bacnet://10.0.0.9#1001",
+            network="10.0.0.0/24",
+            client_ip="10.0.0.2/24",
+            include_schedules=True,
+        )
+    )
+
+    # then
+    assert captured["include_schedules"] is True
+    assert [p.point_type for p in result.data.device.points] == ["analogInput"]
+
+
 def test_scan_network_uses_bacnet_ip_fallback(monkeypatch) -> None:
     # given
     captured: dict[str, str] = {}

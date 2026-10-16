@@ -12,6 +12,7 @@ from ._normalization import (
     BACNET_DATA_TYPE_PREFIXES,
     BACNET_MEDIUM_BY_OBJECT_TYPE,
     BACNET_MEDIUM_BY_PREFIX,
+    BACNET_NON_POINT_OBJECT_TYPES,
     BACNET_QUANTITY_BY_UNIT,
     NORMALIZATION_VERSION,
 )
@@ -83,6 +84,12 @@ def bacnet_device_to_device(raw_device: Any, *, network: str | None = None) -> D
             raw={"object_list": object_list},
         ),
     )
+
+
+def is_bacnet_point(raw_object: Any) -> bool:
+    """False for objects that must not become graph points (schedules...)."""
+    object_type = raw_object.object_identifier.object_type.lower()
+    return object_type not in BACNET_NON_POINT_OBJECT_TYPES
 
 
 def bacnet_object_to_point(raw_object: Any, *, network: str | None = None) -> Point:

@@ -100,9 +100,10 @@ Callers that manage controllers directly can pass `identity=` to
 
 ### BACnet schedules
 
-Object discovery returns the I/O points. Schedules and calendars are not
-points, so they stay out of the graph and the classifier unless you pass
-`include_schedules=True`; then they come back along with the points. Read a schedule's full contents with
+Object discovery returns the I/O points. With `include_schedules=True`,
+`discover_bacnet_objects()` also returns Schedule and Calendar objects, so you
+can find schedules to read. They are not points, so they never enter the graph
+or the classifier, even with the flag on. Read a schedule's full contents with
 `read_bacnet_schedule()`:
 
 ```python

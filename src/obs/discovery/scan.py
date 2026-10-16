@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
-from ._adapters import bacnet_device_to_device, bacnet_object_to_point
+from ._adapters import bacnet_device_to_device, bacnet_object_to_point, is_bacnet_point
 from ._context import scan_context, timings, utc_now
 from ._identity import device_identifier_from_device, parse_device_identifier
 from .network import auto_detect_client_ip, detect_local_network
@@ -318,6 +318,7 @@ async def discover_objects(
             discovered_device.points = [
                 bacnet_object_to_point(raw_object, network=resolved_network)
                 for raw_object in raw_result.data
+                if is_bacnet_point(raw_object)
             ]
         else:
             raise ValueError(f"Unsupported protocol: {protocol}")
