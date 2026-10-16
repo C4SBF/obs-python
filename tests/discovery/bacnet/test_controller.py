@@ -503,6 +503,39 @@ def test_scan_device_objects_with_object_list(
     assert result == discovered
 
 
+def test_scan_device_objects_includes_schedules_and_calendars(
+    initialized_controller: BACnetController, monkeypatch
+) -> None:
+    # given
+    read_objects_rpm = AsyncMock(return_value=[])
+    monkeypatch.setattr(initialized_controller, "read_objects_rpm", read_objects_rpm)
+    object_list = [
+        controller_module.BACnetObjectIdentifier(object_type=t, instance=i)
+        for t, i in [
+            ("device", 10),
+            ("analog-value", 1),
+            ("schedule", 0),
+            ("calendar", 2),
+            ("trend-log", 4),
+        ]
+    ]
+
+    # when
+    asyncio.run(
+        initialized_controller.scan_device_objects(
+            "1.2.3.4", 10, object_list=object_list
+        )
+    )
+
+    # then
+    assert read_objects_rpm.await_args is not None
+    assert read_objects_rpm.await_args.args[2] == [
+        ("analogValue", 1),
+        ("schedule", 0),
+        ("calendar", 2),
+    ]
+
+
 def test_scan_device_objects_initializes_when_needed(monkeypatch) -> None:
     # given
     controller = BACnetController(client_ip="1.1.1.1/24")
@@ -570,7 +603,7 @@ def test_scan_device_objects_locked_uses_instance_fallback(
     assert result == discovered
     assert read_objects_rpm.await_args is not None
     assert read_objects_rpm.await_args.kwargs["batch_size"] == 3
-    assert len(read_objects_rpm.await_args.args[2]) == 6
+    assert len(read_objects_rpm.await_args.args[2]) == 8
 
 
 def test_scan_device_objects_locked_returns_empty_on_error(

@@ -20,6 +20,7 @@ BACNET_DATA_TYPE_BY_OBJECT_TYPE: dict[str, str] = {
     "datetimevalue": "datetime",
     "datevalue": "date",
     "timevalue": "time",
+    "calendar": "bool",
 }
 
 BACNET_ACCESS_BY_OBJECT_TYPE: dict[str, str] = {

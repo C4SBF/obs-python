@@ -8,6 +8,7 @@ from typing import Any
 
 from ..types import BACnetDeviceIdentifier, BACnetObject, BACnetObjectIdentifier
 from .constants import BACNET_ERRORS
+from .values import normalize_object_type, to_native
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,8 @@ class ObjectScanMixin:
                 "binaryInput",
                 "analogOutput",
                 "binaryOutput",
+                "schedule",
+                "calendar",
             ]
 
             all_objects: list[tuple[str, int]] = []
@@ -333,24 +336,8 @@ class ObjectScanMixin:
             )
             return None
 
-    @staticmethod
-    def _normalize_object_type(obj_type_str: str) -> str:
-        if "-" not in obj_type_str:
-            return obj_type_str
-        parts = obj_type_str.split("-")
-        return parts[0] + "".join(word.capitalize() for word in parts[1:])
-
-    @staticmethod
-    def _to_native(value: Any) -> bool | int | float | str | None:
-        if value is None:
-            return None
-        if isinstance(value, bool):
-            return bool(value)
-        if isinstance(value, float):
-            return float(value)
-        if isinstance(value, int):
-            return int(value)
-        return str(value)
+    _normalize_object_type = staticmethod(normalize_object_type)
+    _to_native = staticmethod(to_native)
 
     @staticmethod
     def _unit_id(units_code: Any) -> str | None:

@@ -98,6 +98,34 @@ assigned to your organization.
 Callers that manage controllers directly can pass `identity=` to
 `get_bacnet_controller()` or `BACnetController()` instead.
 
+### BACnet schedules
+
+Object discovery returns Schedule and Calendar objects along with the points.
+Read a schedule's full contents with `read_bacnet_schedule()`:
+
+```python
+from obs.discovery.bacnet import discover_bacnet_objects_sync, read_bacnet_schedule_sync
+
+objects = discover_bacnet_objects_sync("192.168.1.50", 1001)
+for obj in objects.data:
+    if obj.object_identifier.object_type == "schedule":
+        schedule = read_bacnet_schedule_sync(
+            "192.168.1.50", obj.object_identifier.instance
+        )
+        if schedule is not None:
+            for day in schedule.weekly_schedule:
+                print(day.day, [(e.time, e.value) for e in day.entries])
+```
+
+`BACnetSchedule` holds the name, present value, default, effective period,
+weekly schedule (Monday to Sunday), exception schedule and the points the
+schedule writes to. A BACnet Null comes back as `None`: it means "release", so
+the schedule default applies. It is never `0`. Properties that could not be
+read are listed in `missing_properties`. The read goes straight to the device
+address, so devices that ignore Who-Is work too. Use
+`dataclasses.asdict(schedule)` for JSON-ready data. `obs.to_dict()` drops `None`
+values, which here mean "release".
+
 ### Async API
 
 All scan, classify, and enhance functions have async variants:
