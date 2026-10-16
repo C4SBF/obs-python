@@ -27,6 +27,7 @@ from bacpypes3.primitivedata import (
     Unsigned,
 )
 
+from obs import to_dict
 from obs.discovery.bacnet.controller import BACnetController
 from obs.discovery.bacnet.controller import schedule_read
 from obs.discovery.bacnet.controller.values import to_native
@@ -342,3 +343,20 @@ def test_read_schedule_stops_when_present_value_fails() -> None:
     # then
     assert schedule is None
     assert device.reads == ["presentValue"]
+
+
+def test_to_dict_keeps_release_and_any_date() -> None:
+    # given
+    schedule = _read(
+        FakeDevice(_occupancy_schedule(scheduleDefault=AnyAtomic(Null(()))))
+    )
+    assert schedule is not None
+
+    # when
+    data = to_dict(schedule)
+
+    # then
+    assert data["schedule_default"] is None
+    assert data["effective_period"] == {"start": None, "end": None}
+    assert data["weekly_schedule"][0]["entries"][1] == {"time": "12:00", "value": None}
+    assert data["weekly_schedule"][2] == {"day": "Wednesday", "entries": []}

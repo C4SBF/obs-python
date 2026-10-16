@@ -126,9 +126,9 @@ weekly schedule (Monday to Sunday), exception schedule and the points the
 schedule writes to. A BACnet Null comes back as `None`: it means "release", so
 the schedule default applies. It is never `0`. Properties that could not be
 read are listed in `missing_properties`. The read goes straight to the device
-address, so devices that ignore Who-Is work too. Use
-`dataclasses.asdict(schedule)` for JSON-ready data. `obs.to_dict()` drops `None`
-values, which here mean "release".
+address, so devices that ignore Who-Is work too. `obs.to_dict(schedule)` gives
+JSON-ready data and keeps these `None` values, e.g.
+`{"time": "12:00", "value": null}`.
 
 ### Async API
 

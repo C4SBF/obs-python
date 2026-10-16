@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from ...utils import KEEP_EMPTY
+
 __all__ = [
     "BACnetObjectIdentifier",
     "BACnetDeviceIdentifier",
@@ -84,7 +86,7 @@ class BACnetTimeValue:
     """
 
     time: str
-    value: ScheduleValue
+    value: ScheduleValue = field(metadata=KEEP_EMPTY)
 
 
 @dataclass(slots=True)
@@ -92,7 +94,7 @@ class BACnetDailySchedule:
     """The entries of one weekday, ``"Monday"`` to ``"Sunday"``."""
 
     day: str
-    entries: list[BACnetTimeValue] = field(default_factory=list)
+    entries: list[BACnetTimeValue] = field(default_factory=list, metadata=KEEP_EMPTY)
 
 
 @dataclass(slots=True)
@@ -104,8 +106,8 @@ class BACnetDateRange:
     ``"*-12-25 *"``.
     """
 
-    start: str | None = None
-    end: str | None = None
+    start: str | None = field(default=None, metadata=KEEP_EMPTY)
+    end: str | None = field(default=None, metadata=KEEP_EMPTY)
 
 
 @dataclass(slots=True)
@@ -157,14 +159,15 @@ class BACnetSchedule:
 
     A property that could not be read or decoded keeps its default here and
     is named in ``missing_properties``. Use that list to tell "not read" apart
-    from "empty" or "Null".
+    from "empty" or "Null". :func:`obs.to_dict` keeps the None values that
+    carry meaning (release, any date), so its output can be trusted as is.
     """
 
     device_address: str
     instance: int
     name: str | None = None
-    present_value: ScheduleValue = None
-    schedule_default: ScheduleValue = None
+    present_value: ScheduleValue = field(default=None, metadata=KEEP_EMPTY)
+    schedule_default: ScheduleValue = field(default=None, metadata=KEEP_EMPTY)
     effective_period: BACnetDateRange | None = None
     weekly_schedule: list[BACnetDailySchedule] = field(default_factory=list)
     exception_schedule: list[BACnetSpecialEvent] = field(default_factory=list)
