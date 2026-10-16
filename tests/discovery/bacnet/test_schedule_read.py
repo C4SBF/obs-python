@@ -36,6 +36,7 @@ from obs.discovery.bacnet.types import (
     BACnetDateRange,
     BACnetObjectIdentifier,
     BACnetObjectPropertyReference,
+    BACnetSchedule,
     BACnetSpecialEvent,
     BACnetSpecialEventPeriod,
     BACnetTimeValue,
@@ -81,24 +82,35 @@ def _occupancy_schedule(**overrides) -> dict[str, object]:
 class FakeDevice(BACnetController):
     """A controller whose direct reads come from a dict of schedule:0 values.
 
-    A missing property reads as None, which is what a failed read returns.
+    ``failures`` maps a property to the ReadFailure its read returns. A
+    property in neither dict fails with "unknown_property".
     """
 
-    def __init__(self, props: dict[str, object]):
+    def __init__(
+        self, props: dict[str, object], failures: dict[str, str] | None = None
+    ):
         super().__init__(client_ip="192.168.1.2/24")
         self.props = props
+        self.failures = failures or {}
         self.reads: list[str] = []
 
-    async def direct_read_property(
+    async def direct_read_property_detailed(
         self, device_address, object_type, instance, property_name, *, timeout=5.0
     ):
         assert (device_address, object_type, instance) == (ADDRESS, "schedule", 0)
         self.reads.append(property_name)
-        return self.props.get(property_name)
+        if property_name in self.failures:
+            return None, self.failures[property_name]
+        if property_name not in self.props:
+            return None, "unknown_property"
+        return self.props[property_name], None
 
 
-def _read(device: FakeDevice):
-    return asyncio.run(device.read_schedule(ADDRESS, 0))
+def _read(device: FakeDevice) -> BACnetSchedule:
+    result = asyncio.run(device.read_schedule(ADDRESS, 0))
+    assert result.failure is None
+    assert result.data is not None
+    return result.data
 
 
 # --- decoding ----------------------------------------------------------------
@@ -287,7 +299,6 @@ def test_read_schedule_decodes_every_property() -> None:
     schedule = _read(device)
 
     # then
-    assert schedule is not None
     assert schedule.device_address == ADDRESS
     assert schedule.instance == 0
     assert schedule.name == "occupancyschedule"
@@ -299,7 +310,7 @@ def test_read_schedule_decodes_every_property() -> None:
     assert schedule.controlled_points[0].object_identifier == (
         BACnetObjectIdentifier("binaryValue", 1)
     )
-    assert schedule.missing_properties == []
+    assert schedule.missing_properties == {}
 
 
 def test_read_schedule_null_default_is_none() -> None:
@@ -310,39 +321,73 @@ def test_read_schedule_null_default_is_none() -> None:
     schedule = _read(device)
 
     # then
-    assert schedule is not None
     assert schedule.schedule_default is None
     assert "scheduleDefault" not in schedule.missing_properties
 
 
-def test_read_schedule_lists_properties_that_fail() -> None:
+def test_read_schedule_lists_properties_that_fail_with_reason() -> None:
     # given
     props = _occupancy_schedule()
     del props["exceptionSchedule"]
     props["weeklySchedule"] = object()  # can't be decoded
-    device = FakeDevice(props)
+    device = FakeDevice(props, failures={"effectivePeriod": "access_denied"})
 
     # when
     schedule = _read(device)
 
     # then
-    assert schedule is not None
     assert schedule.weekly_schedule == []
     assert schedule.exception_schedule == []
-    assert schedule.missing_properties == ["weeklySchedule", "exceptionSchedule"]
+    assert schedule.missing_properties == {
+        "effectivePeriod": "access_denied",
+        "weeklySchedule": "decode_error",
+        "exceptionSchedule": "unknown_property",
+    }
     assert schedule.name == "occupancyschedule"
 
 
-def test_read_schedule_stops_when_present_value_fails() -> None:
-    # given — no answer: every read fails.
-    device = FakeDevice({})
+@pytest.mark.parametrize("failure", ["no_response", "unknown_object"])
+def test_read_schedule_reports_why_there_is_no_schedule(failure) -> None:
+    # given
+    device = FakeDevice(_occupancy_schedule(), failures={"presentValue": failure})
+
+    # when
+    result = asyncio.run(device.read_schedule(ADDRESS, 0))
+
+    # then
+    assert result.data is None
+    assert result.failure == failure
+    assert result.error is not None
+    assert device.reads == ["presentValue"]
+
+
+def test_read_schedule_continues_when_present_value_is_denied() -> None:
+    # given
+    device = FakeDevice(
+        _occupancy_schedule(), failures={"presentValue": "access_denied"}
+    )
 
     # when
     schedule = _read(device)
 
     # then
-    assert schedule is None
-    assert device.reads == ["presentValue"]
+    assert schedule.present_value is None
+    assert schedule.missing_properties == {"presentValue": "access_denied"}
+    assert schedule.weekly_schedule[0].entries[0].value is True
+
+
+def test_read_schedule_stops_reading_once_device_goes_silent() -> None:
+    # given
+    device = FakeDevice(_occupancy_schedule(), failures={"objectName": "no_response"})
+
+    # when
+    schedule = _read(device)
+
+    # then
+    assert device.reads == ["presentValue", "objectName"]
+    assert schedule.present_value is False
+    assert set(schedule.missing_properties.values()) == {"no_response"}
+    assert len(schedule.missing_properties) == 6
 
 
 def test_to_dict_keeps_release_and_any_date() -> None:
@@ -350,7 +395,6 @@ def test_to_dict_keeps_release_and_any_date() -> None:
     schedule = _read(
         FakeDevice(_occupancy_schedule(scheduleDefault=AnyAtomic(Null(()))))
     )
-    assert schedule is not None
 
     # when
     data = to_dict(schedule)

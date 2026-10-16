@@ -27,9 +27,11 @@ from .types import (
     BACnetObjectsDiscoveryResult,
     BACnetScanTimings,
     BACnetSchedule,
+    BACnetScheduleReadResult,
     BACnetSpecialEvent,
     BACnetSpecialEventPeriod,
     BACnetTimeValue,
+    ReadFailure,
     ScheduleValue,
 )
 
@@ -54,6 +56,8 @@ __all__ = [
     "BACnetObjectsDiscoveryResult",
     "ScheduleValue",
     "BACnetSchedule",
+    "BACnetScheduleReadResult",
+    "ReadFailure",
     "BACnetTimeValue",
     "BACnetDailySchedule",
     "BACnetDateRange",

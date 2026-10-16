@@ -18,9 +18,11 @@ from ..types import (
     BACnetObjectIdentifier,
     BACnetObjectPropertyReference,
     BACnetSchedule,
+    BACnetScheduleReadResult,
     BACnetSpecialEvent,
     BACnetSpecialEventPeriod,
     BACnetTimeValue,
+    ReadFailure,
 )
 from .values import normalize_object_type, to_native
 
@@ -133,8 +135,7 @@ def decode_object_references(references: Any) -> list[BACnetObjectPropertyRefere
 
 
 # (BACnetSchedule field, BACnet property, decoder). presentValue goes first:
-# if it can't be read, the device is treated as unreachable and the rest are
-# skipped, since each failed read costs a full timeout.
+# its failure tells whether the schedule exists and the device answers.
 SCHEDULE_PROPERTIES: tuple[tuple[str, str, Callable[[Any], Any]], ...] = (
     ("present_value", "presentValue", to_native),
     ("name", "objectName", str),
@@ -144,6 +145,12 @@ SCHEDULE_PROPERTIES: tuple[tuple[str, str, Callable[[Any], Any]], ...] = (
     ("exception_schedule", "exceptionSchedule", decode_exception_schedule),
     ("controlled_points", "listOfObjectPropertyReferences", decode_object_references),
 )
+
+# presentValue failures that mean there is no schedule to read.
+_WHOLE_READ_FAILURES: dict[ReadFailure, str] = {
+    "no_response": "device did not answer",
+    "unknown_object": "device has no such schedule",
+}
 
 
 class ScheduleReadMixin:
@@ -155,24 +162,38 @@ class ScheduleReadMixin:
         instance: int,
         *,
         timeout: float = 5.0,
-    ) -> BACnetSchedule | None:
+    ) -> BACnetScheduleReadResult:
         """Read and decode ``schedule:<instance>`` on ``device_address``.
 
-        Returns ``None`` if ``presentValue`` can't be read: the schedule
-        doesn't exist or the device didn't answer. Other properties that fail
-        are listed in :attr:`BACnetSchedule.missing_properties`.
+        If the device doesn't answer or has no such schedule, ``data`` is None
+        and ``failure`` says which. Otherwise ``data`` is set, and properties
+        that failed (e.g. access denied) are in ``missing_properties``.
 
-        ``timeout`` applies to each property read.
+        Once the device stops answering, the remaining properties are not
+        tried: each would cost a full ``timeout``, which applies per read.
         """
+        result = BACnetScheduleReadResult(
+            device_address=device_address, instance=instance
+        )
         schedule = BACnetSchedule(device_address=device_address, instance=instance)
+        device_answers = True
         for field_name, prop, decode in SCHEDULE_PROPERTIES:
-            raw = await self.direct_read_property(  # type: ignore[attr-defined]
+            if not device_answers:
+                schedule.missing_properties[prop] = "no_response"
+                continue
+            raw, failure = await self.direct_read_property_detailed(  # type: ignore[attr-defined]
                 device_address, "schedule", instance, prop, timeout=timeout
             )
-            if raw is None:
-                if field_name == "present_value":
-                    return None
-                schedule.missing_properties.append(prop)
+            if failure is not None:
+                if field_name == "present_value" and failure in _WHOLE_READ_FAILURES:
+                    result.failure = failure
+                    result.error = (
+                        f"schedule:{instance} on {device_address}: "
+                        f"{_WHOLE_READ_FAILURES[failure]}"
+                    )
+                    return result
+                schedule.missing_properties[prop] = failure
+                device_answers = failure != "no_response"
                 continue
             try:
                 setattr(schedule, field_name, decode(raw))
@@ -184,5 +205,6 @@ class ScheduleReadMixin:
                     prop,
                     exc,
                 )
-                schedule.missing_properties.append(prop)
-        return schedule
+                schedule.missing_properties[prop] = "decode_error"
+        result.data = schedule
+        return result

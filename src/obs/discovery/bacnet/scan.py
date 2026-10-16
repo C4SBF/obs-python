@@ -17,7 +17,7 @@ from .types import (
     BACnetObjectsDiscoveryInput,
     BACnetObjectsDiscoveryResult,
     BACnetScanTimings,
-    BACnetSchedule,
+    BACnetScheduleReadResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -202,16 +202,16 @@ async def read_bacnet_schedule(
     client_ip: str | None = None,
     bbmd_ip: str | None = None,
     timeout: float = 5.0,
-) -> BACnetSchedule | None:
+) -> BACnetScheduleReadResult:
     """Read one Schedule object: name, values, weekly and exception schedules.
 
     Reads straight from ``device_address``, so devices that ignore Who-Is
     work too. Find schedule instances with :func:`discover_bacnet_objects`
     and ``include_schedules=True``.
 
-    Returns ``None`` if the schedule can't be read: it doesn't exist, the
-    device didn't answer, or the controller failed to start. ``timeout``
-    applies to each property read.
+    Never raises. ``data`` is the schedule; when it is None, ``failure``
+    says why (``"no_response"``, ``"unknown_object"``, or ``"error"`` if the
+    controller failed to start). ``timeout`` applies to each property read.
     """
     try:
         controller = get_bacnet_controller(client_ip=client_ip, bbmd_ip=bbmd_ip)
@@ -222,7 +222,12 @@ async def read_bacnet_schedule(
         logger.warning(
             "Could not read schedule:%d from %s: %s", instance, device_address, exc
         )
-        return None
+        return BACnetScheduleReadResult(
+            device_address=device_address,
+            instance=instance,
+            failure="error",
+            error=str(exc),
+        )
 
 
 def read_bacnet_schedule_sync(
@@ -232,7 +237,7 @@ def read_bacnet_schedule_sync(
     client_ip: str | None = None,
     bbmd_ip: str | None = None,
     timeout: float = 5.0,
-) -> BACnetSchedule | None:
+) -> BACnetScheduleReadResult:
     """Synchronous wrapper for read_bacnet_schedule()."""
     return run_sync(
         read_bacnet_schedule(

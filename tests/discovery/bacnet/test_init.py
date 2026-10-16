@@ -13,6 +13,7 @@ def test_init_exports_new_api_symbols() -> None:
         "read_bacnet_schedule",
         "read_bacnet_schedule_sync",
         "BACnetSchedule",
+        "BACnetScheduleReadResult",
         "BACnetDevice",
         "BACnetObject",
         "BACnetNetworkScanResult",

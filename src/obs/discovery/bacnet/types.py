@@ -20,6 +20,8 @@ __all__ = [
     "BACnetSpecialEvent",
     "BACnetObjectPropertyReference",
     "BACnetSchedule",
+    "ReadFailure",
+    "BACnetScheduleReadResult",
     "BACnetScanTimings",
     "BACnetNetworkScanInput",
     "BACnetObjectsDiscoveryInput",
@@ -71,6 +73,24 @@ class BACnetObject:
     value: bool | int | float | str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+
+ReadFailure = Literal[
+    "no_response",
+    "unknown_object",
+    "unknown_property",
+    "access_denied",
+    "decode_error",
+    "error",
+]
+"""Why a BACnet read failed.
+
+- ``"no_response"``: the device did not answer (offline or unreachable).
+- ``"unknown_object"``: the device has no such object.
+- ``"unknown_property"``: the object has no such property.
+- ``"access_denied"``: the device refused to return the value.
+- ``"decode_error"``: the value arrived but could not be decoded.
+- ``"error"``: any other failure; the log has details.
+"""
 
 ScheduleValue = bool | int | float | str | None
 """A value a schedule commands. ``None`` is BACnet Null: "release"."""
@@ -157,9 +177,9 @@ class BACnetObjectPropertyReference:
 class BACnetSchedule:
     """A Schedule object, decoded to plain data.
 
-    A property that could not be read or decoded keeps its default here and
-    is named in ``missing_properties``. Use that list to tell "not read" apart
-    from "empty" or "Null". :func:`obs.to_dict` keeps the None values that
+    A property that could not be read or decoded keeps its default here.
+    ``missing_properties`` maps its BACnet name to the :data:`ReadFailure`.
+    Use it to tell "not read" apart from "empty" or "Null". :func:`obs.to_dict` keeps the None values that
     carry meaning (release, any date), so its output can be trusted as is.
     """
 
@@ -172,7 +192,24 @@ class BACnetSchedule:
     weekly_schedule: list[BACnetDailySchedule] = field(default_factory=list)
     exception_schedule: list[BACnetSpecialEvent] = field(default_factory=list)
     controlled_points: list[BACnetObjectPropertyReference] = field(default_factory=list)
-    missing_properties: list[str] = field(default_factory=list)
+    missing_properties: dict[str, ReadFailure] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class BACnetScheduleReadResult:
+    """Result of reading one Schedule object.
+
+    ``data`` is set whenever the schedule could be read at all, even if some
+    properties are missing. When it is None, ``failure`` says why: the device
+    did not answer (``"no_response"``) or has no such schedule
+    (``"unknown_object"``). ``error`` is a human-readable message.
+    """
+
+    device_address: str
+    instance: int
+    data: BACnetSchedule | None = None
+    failure: ReadFailure | None = None
+    error: str | None = None
 
 
 @dataclass(slots=True)

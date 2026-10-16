@@ -7,7 +7,7 @@ from obs.discovery.bacnet import scan as scan_module
 from obs.discovery.bacnet.types import (
     BACnetDeviceIdentifier,
     BACnetObjectIdentifier,
-    BACnetSchedule,
+    BACnetScheduleReadResult,
 )
 from tests.discovery.bacnet.factories import make_bacnet_device, make_bacnet_object
 
@@ -154,7 +154,7 @@ def test_discover_bacnet_objects_sync_uses_run_sync(monkeypatch) -> None:
 def test_read_bacnet_schedule_success(monkeypatch) -> None:
     # given
     controller = StubController(initialized=False)
-    schedule = BACnetSchedule(device_address="1.2.3.4", instance=3)
+    schedule = BACnetScheduleReadResult(device_address="1.2.3.4", instance=3)
     controller.read_schedule.return_value = schedule
     monkeypatch.setattr(scan_module, "get_bacnet_controller", lambda **_: controller)
 
@@ -167,7 +167,7 @@ def test_read_bacnet_schedule_success(monkeypatch) -> None:
     controller.read_schedule.assert_awaited_once_with("1.2.3.4", 3, timeout=2.0)
 
 
-def test_read_bacnet_schedule_error_returns_none(monkeypatch) -> None:
+def test_read_bacnet_schedule_error_returns_failure(monkeypatch) -> None:
     # given
     controller = StubController(initialized=True)
     controller.read_schedule.side_effect = RuntimeError("not initialized")
@@ -177,12 +177,14 @@ def test_read_bacnet_schedule_error_returns_none(monkeypatch) -> None:
     result = asyncio.run(scan_module.read_bacnet_schedule("1.2.3.4", 3))
 
     # then
-    assert result is None
+    assert result.data is None
+    assert result.failure == "error"
+    assert result.error == "not initialized"
 
 
 def test_read_bacnet_schedule_sync_allows_every_property_read(monkeypatch) -> None:
     # given
-    expected = BACnetSchedule(device_address="1.2.3.4", instance=3)
+    expected = BACnetScheduleReadResult(device_address="1.2.3.4", instance=3)
 
     def _fake_run_sync(coro, *, timeout):
         coro.close()
