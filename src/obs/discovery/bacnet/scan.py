@@ -116,8 +116,13 @@ async def discover_bacnet_objects(
     object_list: list[BACnetObjectIdentifier] | None = None,
     rpm_batch_size: int = 10,
     max_instance: int = 1000,
+    include_schedules: bool = False,
 ) -> BACnetObjectsDiscoveryResult:
-    """Discover BACnet objects for one BACnet device address/id."""
+    """Discover BACnet objects for one BACnet device address/id.
+
+    Returns the I/O points. ``include_schedules`` also returns Schedule and
+    Calendar objects.
+    """
     device_identifier = BACnetDeviceIdentifier(
         address=device_address, device_id=device_id
     )
@@ -128,6 +133,7 @@ async def discover_bacnet_objects(
         max_instance=max_instance,
         client_ip=client_ip,
         bbmd_ip=bbmd_ip,
+        include_schedules=include_schedules,
     )
     started = utc_now()
 
@@ -142,6 +148,7 @@ async def discover_bacnet_objects(
             max_instance=max_instance,
             object_list=object_list,
             rpm_batch_size=rpm_batch_size,
+            include_schedules=include_schedules,
         )
         finished = utc_now()
         return BACnetObjectsDiscoveryResult(
@@ -170,6 +177,7 @@ def discover_bacnet_objects_sync(
     object_list: list[BACnetObjectIdentifier] | None = None,
     rpm_batch_size: int = 10,
     max_instance: int = 1000,
+    include_schedules: bool = False,
 ) -> BACnetObjectsDiscoveryResult:
     """Synchronous wrapper for discover_bacnet_objects()."""
     return run_sync(
@@ -181,6 +189,7 @@ def discover_bacnet_objects_sync(
             object_list=object_list,
             rpm_batch_size=rpm_batch_size,
             max_instance=max_instance,
+            include_schedules=include_schedules,
         ),
         timeout=BACNET_OPERATION_TIMEOUT,
     )
@@ -198,7 +207,7 @@ async def read_bacnet_schedule(
 
     Reads straight from ``device_address``, so devices that ignore Who-Is
     work too. Find schedule instances with :func:`discover_bacnet_objects`
-    (object type ``"schedule"``).
+    and ``include_schedules=True``.
 
     Returns ``None`` if the schedule can't be read: it doesn't exist, the
     device didn't answer, or the controller failed to start. ``timeout``

@@ -12,6 +12,19 @@ from .values import normalize_object_type, to_native
 
 logger = logging.getLogger(__name__)
 
+# The I/O points: what goes into the graph and the classifier.
+_POINT_OBJECT_TYPES: tuple[str, ...] = (
+    "analogValue",
+    "binaryValue",
+    "analogInput",
+    "binaryInput",
+    "analogOutput",
+    "binaryOutput",
+)
+
+# Time-based control objects. Not points, so only read on request.
+_SCHEDULE_OBJECT_TYPES: tuple[str, ...] = ("schedule", "calendar")
+
 
 class ObjectScanMixin:
     """Device object discovery and reads."""
@@ -28,8 +41,13 @@ class ObjectScanMixin:
         max_instance: int = 1000,
         object_list: list[BACnetObjectIdentifier] | None = None,
         rpm_batch_size: int = 10,
+        include_schedules: bool = False,
     ) -> list[BACnetObject]:
-        """Read all objects for a device."""
+        """Read the device's I/O points.
+
+        ``include_schedules`` also reads Schedule and Calendar objects.
+        Without an objectList, each extra type costs ``max_instance`` probes.
+        """
         if not self._initialized:
             await self.initialize()  # type: ignore[attr-defined]
         if self.bacnet is None:
@@ -42,6 +60,7 @@ class ObjectScanMixin:
                 max_instance,
                 object_list,
                 rpm_batch_size,
+                include_schedules,
             )
 
     async def _scan_device_objects_locked(
@@ -51,7 +70,11 @@ class ObjectScanMixin:
         max_instance: int,
         object_list: list[BACnetObjectIdentifier] | None,
         rpm_batch_size: int,
+        include_schedules: bool = False,
     ) -> list[BACnetObject]:
+        object_types = _POINT_OBJECT_TYPES
+        if include_schedules:
+            object_types += _SCHEDULE_OBJECT_TYPES
         try:
             logger.info(
                 "Starting object scan for device %s:%d", device_address, device_id
@@ -75,17 +98,6 @@ class ObjectScanMixin:
                         "Could not read objectList: %s. Falling back to instance scanning",
                         exc,
                     )
-
-            object_types = [
-                "analogValue",
-                "binaryValue",
-                "analogInput",
-                "binaryInput",
-                "analogOutput",
-                "binaryOutput",
-                "schedule",
-                "calendar",
-            ]
 
             all_objects: list[tuple[str, int]] = []
             if use_object_list and object_list:

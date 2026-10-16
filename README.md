@@ -100,13 +100,17 @@ Callers that manage controllers directly can pass `identity=` to
 
 ### BACnet schedules
 
-Object discovery returns Schedule and Calendar objects along with the points.
-Read a schedule's full contents with `read_bacnet_schedule()`:
+Object discovery returns the I/O points. Schedules and calendars are not
+points, so they stay out of the graph and the classifier unless you pass
+`include_schedules=True`; then they come back along with the points. Read a schedule's full contents with
+`read_bacnet_schedule()`:
 
 ```python
 from obs.discovery.bacnet import discover_bacnet_objects_sync, read_bacnet_schedule_sync
 
-objects = discover_bacnet_objects_sync("192.168.1.50", 1001)
+objects = discover_bacnet_objects_sync(
+    "192.168.1.50", 1001, include_schedules=True
+)
 for obj in objects.data:
     if obj.object_identifier.object_type == "schedule":
         schedule = read_bacnet_schedule_sync(

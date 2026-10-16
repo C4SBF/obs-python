@@ -101,6 +101,23 @@ def test_discover_bacnet_objects_success(monkeypatch) -> None:
     controller.scan_device_objects.assert_awaited_once()
 
 
+def test_discover_bacnet_objects_passes_include_schedules(monkeypatch) -> None:
+    # given
+    controller = StubController(initialized=True)
+    monkeypatch.setattr(scan_module, "get_bacnet_controller", lambda **_: controller)
+
+    # when
+    result = asyncio.run(
+        scan_module.discover_bacnet_objects("1.2.3.4", 7, include_schedules=True)
+    )
+
+    # then
+    call = controller.scan_device_objects.await_args
+    assert call is not None
+    assert call.kwargs["include_schedules"] is True
+    assert result.input.include_schedules is True
+
+
 def test_discover_bacnet_objects_error(monkeypatch) -> None:
     # given
     controller = StubController(initialized=True)

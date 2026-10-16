@@ -201,6 +201,7 @@ class BACnetObjectsDiscoveryInput:
     max_instance: int = 1000
     client_ip: str | None = None
     bbmd_ip: str | None = None
+    include_schedules: bool = False
 
 
 @dataclass(slots=True)
