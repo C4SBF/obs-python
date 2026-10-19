@@ -7,6 +7,14 @@ import types
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from bacpypes3.apdu import (
+    AbortPDU,
+    AbortReason,
+    ErrorPDU,
+    RejectPDU,
+    RejectReason,
+)
+from bacpypes3.basetypes import ErrorClass, ErrorCode
 
 import obs.discovery.bacnet.controller as controller_module
 from obs.discovery.bacnet.controller import BACnetController, LocalDeviceIdentity
@@ -258,6 +266,91 @@ def test_direct_read_property_swallows_read_errors(
     assert result is None
 
 
+def _error_pdu(code: str) -> ErrorPDU:
+    pdu = ErrorPDU()
+    pdu.errorClass = ErrorClass("object")
+    pdu.errorCode = ErrorCode(code)
+    return pdu
+
+
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        (_error_pdu("unknown-object"), "unknown_object"),
+        (_error_pdu("unknown-property"), "unknown_property"),
+        (_error_pdu("read-access-denied"), "access_denied"),
+        (_error_pdu("other"), "error"),
+        (AbortPDU(reason=AbortReason.noResponse), "no_response"),
+        (AbortPDU(reason=AbortReason.other), "error"),
+        (RejectPDU(reason=RejectReason.other), "error"),
+    ],
+)
+def test_direct_read_property_detailed_maps_errors_to_reasons(
+    initialized_controller: BACnetController, bacnet_mock: Mock, response, expected
+) -> None:
+    # given — bacpypes3 returns the Error/Abort/Reject instead of raising it.
+    bacpypes_app = Mock()
+    bacpypes_app.read_property = AsyncMock(return_value=response)
+    bacnet_mock.this_application = Mock(app=bacpypes_app)
+
+    # when
+    result = asyncio.run(
+        initialized_controller.direct_read_property_detailed(
+            "1.2.3.4", "schedule", 0, "presentValue"
+        )
+    )
+
+    # then
+    assert result == (None, expected)
+
+
+@pytest.mark.parametrize(
+    ("side_effect", "expected"),
+    [
+        (TimeoutError(), "no_response"),
+        (_error_pdu("read-access-denied"), "access_denied"),
+        (OSError("network down"), "error"),
+    ],
+)
+def test_direct_read_property_detailed_maps_raised_errors(
+    initialized_controller: BACnetController,
+    bacnet_mock: Mock,
+    side_effect,
+    expected,
+) -> None:
+    # given
+    bacpypes_app = Mock()
+    bacpypes_app.read_property = AsyncMock(side_effect=side_effect)
+    bacnet_mock.this_application = Mock(app=bacpypes_app)
+
+    # when
+    result = asyncio.run(
+        initialized_controller.direct_read_property_detailed(
+            "1.2.3.4", "schedule", 0, "presentValue"
+        )
+    )
+
+    # then
+    assert result == (None, expected)
+
+
+def test_direct_read_property_detailed_without_app_is_error(
+    initialized_controller: BACnetController, bacnet_mock: Mock
+) -> None:
+    # given
+    bacnet_mock.this_application = None
+
+    # when
+    result = asyncio.run(
+        initialized_controller.direct_read_property_detailed(
+            "1.2.3.4", "schedule", 0, "presentValue"
+        )
+    )
+
+    # then
+    assert result == (None, "error")
+
+
 def test_direct_read_property_raises_when_not_initialized() -> None:
     # given
     controller = BACnetController(client_ip="1.1.1.1/24")
@@ -501,6 +594,49 @@ def test_scan_device_objects_with_object_list(
 
     # then
     assert result == discovered
+
+
+_MIXED_OBJECT_LIST = [
+    ("device", 10),
+    ("analog-value", 1),
+    ("schedule", 0),
+    ("calendar", 2),
+    ("trend-log", 4),
+]
+
+
+@pytest.mark.parametrize(
+    ("include_schedules", "expected"),
+    [
+        # Default: points only, so schedules never reach the graph.
+        (False, [("analogValue", 1)]),
+        (True, [("analogValue", 1), ("schedule", 0), ("calendar", 2)]),
+    ],
+)
+def test_scan_device_objects_includes_schedules_on_request(
+    initialized_controller: BACnetController,
+    monkeypatch,
+    include_schedules,
+    expected,
+) -> None:
+    # given
+    read_objects_rpm = AsyncMock(return_value=[])
+    monkeypatch.setattr(initialized_controller, "read_objects_rpm", read_objects_rpm)
+    object_list = [
+        controller_module.BACnetObjectIdentifier(object_type=t, instance=i)
+        for t, i in _MIXED_OBJECT_LIST
+    ]
+
+    # when
+    asyncio.run(
+        initialized_controller.scan_device_objects(
+            "1.2.3.4", 10, object_list=object_list, include_schedules=include_schedules
+        )
+    )
+
+    # then
+    assert read_objects_rpm.await_args is not None
+    assert read_objects_rpm.await_args.args[2] == expected
 
 
 def test_scan_device_objects_initializes_when_needed(monkeypatch) -> None:

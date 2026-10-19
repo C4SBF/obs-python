@@ -10,6 +10,13 @@ from typing import Any
 
 import yaml
 
+KEEP_EMPTY: dict[str, Any] = {"keep_empty": True}
+"""Field metadata: :func:`to_dict` keeps the field even when None or empty.
+
+Use it where None or an empty list carries meaning, e.g. a schedule value
+where None means "release": ``field(default=None, metadata=KEEP_EMPTY)``.
+"""
+
 
 def _serialize(value: Any) -> Any:
     """Recursively convert a value for JSON output."""
@@ -27,13 +34,15 @@ def _serialize(value: Any) -> Any:
 
 
 def to_dict(obj: Any) -> dict[str, Any]:
-    """Serialize any dataclass, skipping None and empty collections."""
+    """Serialize any dataclass, skipping None and empty collections.
+
+    Fields marked with :data:`KEEP_EMPTY` are always kept.
+    """
     result: dict[str, Any] = {}
     for f in dataclasses.fields(obj):
         value = getattr(obj, f.name)
-        if value is None:
-            continue
-        if isinstance(value, (list, dict)) and not value:
+        is_empty = value is None or (isinstance(value, (list, dict)) and not value)
+        if is_empty and not f.metadata.get("keep_empty"):
             continue
         result[f.name] = _serialize(value)
     return result

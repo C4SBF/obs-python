@@ -4,7 +4,11 @@ import asyncio
 from unittest.mock import AsyncMock
 
 from obs.discovery.bacnet import scan as scan_module
-from obs.discovery.bacnet.types import BACnetDeviceIdentifier, BACnetObjectIdentifier
+from obs.discovery.bacnet.types import (
+    BACnetDeviceIdentifier,
+    BACnetObjectIdentifier,
+    BACnetScheduleReadResult,
+)
 from tests.discovery.bacnet.factories import make_bacnet_device, make_bacnet_object
 
 
@@ -14,6 +18,7 @@ class StubController:
         self.initialize = AsyncMock(return_value=True)
         self.scan_network = AsyncMock(return_value=[])
         self.scan_device_objects = AsyncMock(return_value=[])
+        self.read_schedule = AsyncMock(return_value=None)
 
 
 def test_scan_bacnet_network_success(monkeypatch) -> None:
@@ -96,6 +101,23 @@ def test_discover_bacnet_objects_success(monkeypatch) -> None:
     controller.scan_device_objects.assert_awaited_once()
 
 
+def test_discover_bacnet_objects_passes_include_schedules(monkeypatch) -> None:
+    # given
+    controller = StubController(initialized=True)
+    monkeypatch.setattr(scan_module, "get_bacnet_controller", lambda **_: controller)
+
+    # when
+    result = asyncio.run(
+        scan_module.discover_bacnet_objects("1.2.3.4", 7, include_schedules=True)
+    )
+
+    # then
+    call = controller.scan_device_objects.await_args
+    assert call is not None
+    assert call.kwargs["include_schedules"] is True
+    assert result.input.include_schedules is True
+
+
 def test_discover_bacnet_objects_error(monkeypatch) -> None:
     # given
     controller = StubController(initialized=True)
@@ -124,6 +146,55 @@ def test_discover_bacnet_objects_sync_uses_run_sync(monkeypatch) -> None:
 
     # when
     result = scan_module.discover_bacnet_objects_sync("1.2.3.4", 44)
+
+    # then
+    assert result is expected
+
+
+def test_read_bacnet_schedule_success(monkeypatch) -> None:
+    # given
+    controller = StubController(initialized=False)
+    schedule = BACnetScheduleReadResult(device_address="1.2.3.4", instance=3)
+    controller.read_schedule.return_value = schedule
+    monkeypatch.setattr(scan_module, "get_bacnet_controller", lambda **_: controller)
+
+    # when
+    result = asyncio.run(scan_module.read_bacnet_schedule("1.2.3.4", 3, timeout=2.0))
+
+    # then
+    assert result is schedule
+    controller.initialize.assert_awaited_once()
+    controller.read_schedule.assert_awaited_once_with("1.2.3.4", 3, timeout=2.0)
+
+
+def test_read_bacnet_schedule_error_returns_failure(monkeypatch) -> None:
+    # given
+    controller = StubController(initialized=True)
+    controller.read_schedule.side_effect = RuntimeError("not initialized")
+    monkeypatch.setattr(scan_module, "get_bacnet_controller", lambda **_: controller)
+
+    # when
+    result = asyncio.run(scan_module.read_bacnet_schedule("1.2.3.4", 3))
+
+    # then
+    assert result.data is None
+    assert result.failure == "error"
+    assert result.error == "not initialized"
+
+
+def test_read_bacnet_schedule_sync_allows_every_property_read(monkeypatch) -> None:
+    # given
+    expected = BACnetScheduleReadResult(device_address="1.2.3.4", instance=3)
+
+    def _fake_run_sync(coro, *, timeout):
+        coro.close()
+        assert timeout == 2.0 * len(scan_module.SCHEDULE_PROPERTIES) + 30
+        return expected
+
+    monkeypatch.setattr(scan_module, "run_sync", _fake_run_sync)
+
+    # when
+    result = scan_module.read_bacnet_schedule_sync("1.2.3.4", 3, timeout=2.0)
 
     # then
     assert result is expected

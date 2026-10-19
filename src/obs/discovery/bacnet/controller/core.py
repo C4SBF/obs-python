@@ -14,11 +14,18 @@ from .census import CensusMixin
 from .direct_read import DirectReadMixin
 from .network_scan import NetworkScanMixin
 from .object_scan import ObjectScanMixin
+from .schedule_read import ScheduleReadMixin
 
 logger = logging.getLogger(__name__)
 
 
-class BACnetController(NetworkScanMixin, CensusMixin, ObjectScanMixin, DirectReadMixin):
+class BACnetController(
+    NetworkScanMixin,
+    CensusMixin,
+    ObjectScanMixin,
+    ScheduleReadMixin,
+    DirectReadMixin,
+):
     """Singleton BAC0 wrapper for all BACnet operations.
 
     Args:

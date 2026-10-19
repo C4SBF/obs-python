@@ -22,6 +22,11 @@ BACNET_DATA_TYPE_BY_OBJECT_TYPE: dict[str, str] = {
     "timevalue": "time",
 }
 
+# Object types that are not points. Discovery can return them on request
+# (include_schedules), but they never become graph points: the classifier
+# would label them as sensors or setpoints by name and data type.
+BACNET_NON_POINT_OBJECT_TYPES: frozenset[str] = frozenset({"schedule", "calendar"})
+
 BACNET_ACCESS_BY_OBJECT_TYPE: dict[str, str] = {
     "schedule": "read-write",
     "calendar": "read-write",

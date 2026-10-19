@@ -12,12 +12,32 @@ import asyncio
 import logging
 from typing import Any
 
-from bacpypes3.apdu import ErrorRejectAbortNack
-from bacpypes3.basetypes import PropertyIdentifier
+from bacpypes3.apdu import AbortPDU, AbortReason, ErrorPDU, ErrorRejectAbortNack
+from bacpypes3.basetypes import ErrorCode, PropertyIdentifier
 from bacpypes3.pdu import Address
 from bacpypes3.primitivedata import ObjectIdentifier
 
+from ..types import ReadFailure
+
 logger = logging.getLogger(__name__)
+
+_FAILURE_BY_ERROR_CODE: dict[int, ReadFailure] = {
+    ErrorCode.unknownObject: "unknown_object",
+    ErrorCode.unknownProperty: "unknown_property",
+    ErrorCode.readAccessDenied: "access_denied",
+}
+
+
+def _failure_reason(response: ErrorRejectAbortNack) -> ReadFailure:
+    """Map a bacpypes3 Error/Reject/Abort to a :data:`ReadFailure`."""
+    if isinstance(response, ErrorPDU):
+        return _FAILURE_BY_ERROR_CODE.get(response.errorCode, "error")
+    if (
+        isinstance(response, AbortPDU)
+        and response.apduAbortRejectReason == AbortReason.noResponse
+    ):
+        return "no_response"
+    return "error"
 
 
 class DirectReadMixin:
@@ -38,6 +58,24 @@ class DirectReadMixin:
 
         Returns the raw property value, or None if the read fails.
         """
+        value, _ = await self.direct_read_property_detailed(
+            device_address, object_type, instance, property_name, timeout=timeout
+        )
+        return value
+
+    async def direct_read_property_detailed(
+        self,
+        device_address: str,
+        object_type: str,
+        instance: int,
+        property_name: str,
+        *,
+        timeout: float = 5.0,
+    ) -> tuple[Any | None, ReadFailure | None]:
+        """Like :meth:`direct_read_property`, but also says why a read failed.
+
+        Returns ``(value, None)`` on success, ``(None, reason)`` on failure.
+        """
         if self.bacnet is None:
             raise RuntimeError("BACnet controller not initialized")
 
@@ -46,7 +84,7 @@ class DirectReadMixin:
             logger.debug(
                 "Direct read unavailable: bacpypes3 application handle not exposed"
             )
-            return None
+            return None, "error"
 
         try:
             response = await asyncio.wait_for(
@@ -58,36 +96,49 @@ class DirectReadMixin:
                 ),
                 timeout=timeout,
             )
+        except (TimeoutError, asyncio.TimeoutError) as exc:
+            self._log_failed_read(
+                device_address, object_type, instance, property_name, exc
+            )
+            return None, "no_response"
         except (
             ErrorRejectAbortNack,
-            TimeoutError,
-            asyncio.TimeoutError,
             RuntimeError,
             OSError,
             ValueError,
             TypeError,
         ) as exc:
-            logger.debug(
-                "Direct read %s %s:%s.%s failed: %s",
-                device_address,
-                object_type,
-                instance,
-                property_name,
-                exc,
+            self._log_failed_read(
+                device_address, object_type, instance, property_name, exc
             )
-            return None
+            if isinstance(exc, ErrorRejectAbortNack):
+                return None, _failure_reason(exc)
+            return None, "error"
 
+        # bacpypes3 returns (rather than raises) an Error/Reject/Abort.
         if isinstance(response, ErrorRejectAbortNack):
-            logger.debug(
-                "Direct read %s %s:%s.%s returned error: %s",
-                device_address,
-                object_type,
-                instance,
-                property_name,
-                response,
+            self._log_failed_read(
+                device_address, object_type, instance, property_name, response
             )
-            return None
-        return response
+            return None, _failure_reason(response)
+        return response, None
+
+    @staticmethod
+    def _log_failed_read(
+        device_address: str,
+        object_type: str,
+        instance: int,
+        property_name: str,
+        error: BaseException,
+    ) -> None:
+        logger.debug(
+            "Direct read %s %s:%s.%s failed: %s",
+            device_address,
+            object_type,
+            instance,
+            property_name,
+            error,
+        )
 
     def _bacpypes3_app(self) -> Any | None:
         """Reach into BAC0 to grab the underlying bacpypes3 Application.

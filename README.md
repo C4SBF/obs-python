@@ -98,6 +98,46 @@ assigned to your organization.
 Callers that manage controllers directly can pass `identity=` to
 `get_bacnet_controller()` or `BACnetController()` instead.
 
+### BACnet schedules
+
+Object discovery returns the I/O points. With `include_schedules=True`,
+`discover_bacnet_objects()` also returns Schedule and Calendar objects, so you
+can find schedules to read. They are not points, so they never enter the graph
+or the classifier, even with the flag on. Read a schedule's full contents with
+`read_bacnet_schedule()`:
+
+```python
+from obs.discovery.bacnet import discover_bacnet_objects_sync, read_bacnet_schedule_sync
+
+objects = discover_bacnet_objects_sync(
+    "192.168.1.50", 1001, include_schedules=True
+)
+for obj in objects.data:
+    if obj.object_identifier.object_type == "schedule":
+        result = read_bacnet_schedule_sync(
+            "192.168.1.50", obj.object_identifier.instance
+        )
+        if result.data is None:
+            print("not read:", result.failure)  # e.g. "no_response"
+            continue
+        for day in result.data.weekly_schedule:
+            print(day.day, [(e.time, e.value) for e in day.entries])
+```
+
+`BACnetSchedule` holds the name, present value, default, effective period,
+weekly schedule (Monday to Sunday), exception schedule and the points the
+schedule writes to. A BACnet Null comes back as `None`: it means "release", so
+the schedule default applies. It is never `0`.
+
+The read result says why a schedule could not be read: `failure` is
+`"no_response"` (device offline), `"unknown_object"` (no such schedule) or
+`"error"`. If the schedule was read but some properties were not, for example
+because the device denied access, `missing_properties` maps each one to its
+reason. The read goes straight to the device
+address, so devices that ignore Who-Is work too. `obs.to_dict(schedule)` gives
+JSON-ready data and keeps these `None` values, e.g.
+`{"time": "12:00", "value": null}`.
+
 ### Async API
 
 All scan, classify, and enhance functions have async variants:

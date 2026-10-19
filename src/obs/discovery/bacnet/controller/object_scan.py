@@ -8,8 +8,22 @@ from typing import Any
 
 from ..types import BACnetDeviceIdentifier, BACnetObject, BACnetObjectIdentifier
 from .constants import BACNET_ERRORS
+from .values import normalize_object_type, to_native
 
 logger = logging.getLogger(__name__)
+
+# The I/O points: what goes into the graph and the classifier.
+_POINT_OBJECT_TYPES: tuple[str, ...] = (
+    "analogValue",
+    "binaryValue",
+    "analogInput",
+    "binaryInput",
+    "analogOutput",
+    "binaryOutput",
+)
+
+# Time-based control objects. Not points, so only read on request.
+_SCHEDULE_OBJECT_TYPES: tuple[str, ...] = ("schedule", "calendar")
 
 
 class ObjectScanMixin:
@@ -27,8 +41,13 @@ class ObjectScanMixin:
         max_instance: int = 1000,
         object_list: list[BACnetObjectIdentifier] | None = None,
         rpm_batch_size: int = 10,
+        include_schedules: bool = False,
     ) -> list[BACnetObject]:
-        """Read all objects for a device."""
+        """Read the device's I/O points.
+
+        ``include_schedules`` also reads Schedule and Calendar objects.
+        Without an objectList, each extra type costs ``max_instance`` probes.
+        """
         if not self._initialized:
             await self.initialize()  # type: ignore[attr-defined]
         if self.bacnet is None:
@@ -41,6 +60,7 @@ class ObjectScanMixin:
                 max_instance,
                 object_list,
                 rpm_batch_size,
+                include_schedules,
             )
 
     async def _scan_device_objects_locked(
@@ -50,7 +70,11 @@ class ObjectScanMixin:
         max_instance: int,
         object_list: list[BACnetObjectIdentifier] | None,
         rpm_batch_size: int,
+        include_schedules: bool = False,
     ) -> list[BACnetObject]:
+        object_types = _POINT_OBJECT_TYPES
+        if include_schedules:
+            object_types += _SCHEDULE_OBJECT_TYPES
         try:
             logger.info(
                 "Starting object scan for device %s:%d", device_address, device_id
@@ -74,15 +98,6 @@ class ObjectScanMixin:
                         "Could not read objectList: %s. Falling back to instance scanning",
                         exc,
                     )
-
-            object_types = [
-                "analogValue",
-                "binaryValue",
-                "analogInput",
-                "binaryInput",
-                "analogOutput",
-                "binaryOutput",
-            ]
 
             all_objects: list[tuple[str, int]] = []
             if use_object_list and object_list:
@@ -333,24 +348,8 @@ class ObjectScanMixin:
             )
             return None
 
-    @staticmethod
-    def _normalize_object_type(obj_type_str: str) -> str:
-        if "-" not in obj_type_str:
-            return obj_type_str
-        parts = obj_type_str.split("-")
-        return parts[0] + "".join(word.capitalize() for word in parts[1:])
-
-    @staticmethod
-    def _to_native(value: Any) -> bool | int | float | str | None:
-        if value is None:
-            return None
-        if isinstance(value, bool):
-            return bool(value)
-        if isinstance(value, float):
-            return float(value)
-        if isinstance(value, int):
-            return int(value)
-        return str(value)
+    _normalize_object_type = staticmethod(normalize_object_type)
+    _to_native = staticmethod(to_native)
 
     @staticmethod
     def _unit_id(units_code: Any) -> str | None:

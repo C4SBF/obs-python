@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from .._context import utc_now
 from ._loop import run_sync
 from .controller import BACNET_ERRORS, BACNET_OPERATION_TIMEOUT, get_bacnet_controller
+from .controller.schedule_read import SCHEDULE_PROPERTIES
 from .types import (
     BACnetDeviceIdentifier,
     BACnetNetworkScanInput,
@@ -15,7 +17,10 @@ from .types import (
     BACnetObjectsDiscoveryInput,
     BACnetObjectsDiscoveryResult,
     BACnetScanTimings,
+    BACnetScheduleReadResult,
 )
+
+logger = logging.getLogger(__name__)
 
 _SCAN_FAILURES: tuple[type[BaseException], ...] = (
     ImportError,
@@ -32,6 +37,8 @@ __all__ = [
     "scan_bacnet_network_sync",
     "discover_bacnet_objects",
     "discover_bacnet_objects_sync",
+    "read_bacnet_schedule",
+    "read_bacnet_schedule_sync",
 ]
 
 
@@ -109,8 +116,13 @@ async def discover_bacnet_objects(
     object_list: list[BACnetObjectIdentifier] | None = None,
     rpm_batch_size: int = 10,
     max_instance: int = 1000,
+    include_schedules: bool = False,
 ) -> BACnetObjectsDiscoveryResult:
-    """Discover BACnet objects for one BACnet device address/id."""
+    """Discover BACnet objects for one BACnet device address/id.
+
+    Returns the I/O points. ``include_schedules`` also returns Schedule and
+    Calendar objects.
+    """
     device_identifier = BACnetDeviceIdentifier(
         address=device_address, device_id=device_id
     )
@@ -121,6 +133,7 @@ async def discover_bacnet_objects(
         max_instance=max_instance,
         client_ip=client_ip,
         bbmd_ip=bbmd_ip,
+        include_schedules=include_schedules,
     )
     started = utc_now()
 
@@ -135,6 +148,7 @@ async def discover_bacnet_objects(
             max_instance=max_instance,
             object_list=object_list,
             rpm_batch_size=rpm_batch_size,
+            include_schedules=include_schedules,
         )
         finished = utc_now()
         return BACnetObjectsDiscoveryResult(
@@ -163,6 +177,7 @@ def discover_bacnet_objects_sync(
     object_list: list[BACnetObjectIdentifier] | None = None,
     rpm_batch_size: int = 10,
     max_instance: int = 1000,
+    include_schedules: bool = False,
 ) -> BACnetObjectsDiscoveryResult:
     """Synchronous wrapper for discover_bacnet_objects()."""
     return run_sync(
@@ -174,6 +189,63 @@ def discover_bacnet_objects_sync(
             object_list=object_list,
             rpm_batch_size=rpm_batch_size,
             max_instance=max_instance,
+            include_schedules=include_schedules,
         ),
         timeout=BACNET_OPERATION_TIMEOUT,
+    )
+
+
+async def read_bacnet_schedule(
+    device_address: str,
+    instance: int,
+    *,
+    client_ip: str | None = None,
+    bbmd_ip: str | None = None,
+    timeout: float = 5.0,
+) -> BACnetScheduleReadResult:
+    """Read one Schedule object: name, values, weekly and exception schedules.
+
+    Reads straight from ``device_address``, so devices that ignore Who-Is
+    work too. Find schedule instances with :func:`discover_bacnet_objects`
+    and ``include_schedules=True``.
+
+    Never raises. ``data`` is the schedule; when it is None, ``failure``
+    says why (``"no_response"``, ``"unknown_object"``, or ``"error"`` if the
+    controller failed to start). ``timeout`` applies to each property read.
+    """
+    try:
+        controller = get_bacnet_controller(client_ip=client_ip, bbmd_ip=bbmd_ip)
+        if not controller._initialized:
+            await controller.initialize()
+        return await controller.read_schedule(device_address, instance, timeout=timeout)
+    except _SCAN_FAILURES as exc:
+        logger.warning(
+            "Could not read schedule:%d from %s: %s", instance, device_address, exc
+        )
+        return BACnetScheduleReadResult(
+            device_address=device_address,
+            instance=instance,
+            failure="error",
+            error=str(exc),
+        )
+
+
+def read_bacnet_schedule_sync(
+    device_address: str,
+    instance: int,
+    *,
+    client_ip: str | None = None,
+    bbmd_ip: str | None = None,
+    timeout: float = 5.0,
+) -> BACnetScheduleReadResult:
+    """Synchronous wrapper for read_bacnet_schedule()."""
+    return run_sync(
+        read_bacnet_schedule(
+            device_address,
+            instance,
+            client_ip=client_ip,
+            bbmd_ip=bbmd_ip,
+            timeout=timeout,
+        ),
+        timeout=timeout * len(SCHEDULE_PROPERTIES) + 30,
     )
