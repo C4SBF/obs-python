@@ -50,6 +50,8 @@ class BACnetController(
     ):
         self.bacnet: Any = None
         self._initialized = False
+        # Why the last initialize() failed, for callers to report.
+        self.init_error: str | None = None
         self._init_lock = asyncio.Lock()
         self._semaphore: asyncio.Semaphore = asyncio.Semaphore(max_concurrent)
         self._scan_lock = asyncio.Lock()
@@ -180,6 +182,7 @@ class BACnetController(
 
                 await asyncio.sleep(2)
                 self._initialized = True
+                self.init_error = None
                 logger.info("BAC0 instance initialized successfully on port 47808")
                 return True
 
@@ -193,5 +196,16 @@ class BACnetController(
                 TypeError,
                 AttributeError,
             ) as exc:
-                logger.error("Error initializing BAC0: %s", exc)
-                return False
+                return self._initialization_failed(exc)
+            except Exception as exc:
+                # BAC0.lite() raises BAC0's own InitializationError, e.g. when
+                # it can't open the socket on client_ip. Matched by name
+                # because BAC0 is imported lazily, above.
+                if type(exc).__name__ != "InitializationError":
+                    raise
+                return self._initialization_failed(exc)
+
+    def _initialization_failed(self, exc: Exception) -> bool:
+        logger.error("Error initializing BAC0: %s", exc)
+        self.init_error = str(exc) or type(exc).__name__
+        return False
