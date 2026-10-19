@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock
 
+import pytest
+
 from obs.discovery.bacnet import scan as scan_module
 from obs.discovery.bacnet.types import (
     BACnetDeviceIdentifier,
@@ -19,6 +21,7 @@ class StubController:
         self.scan_network = AsyncMock(return_value=[])
         self.scan_device_objects = AsyncMock(return_value=[])
         self.read_schedule = AsyncMock(return_value=None)
+        self.init_error: str | None = None
 
 
 def test_scan_bacnet_network_success(monkeypatch) -> None:
@@ -198,3 +201,28 @@ def test_read_bacnet_schedule_sync_allows_every_property_read(monkeypatch) -> No
 
     # then
     assert result is expected
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: scan_module.scan_bacnet_network(),
+        lambda: scan_module.discover_bacnet_objects("1.2.3.4", 7),
+        lambda: scan_module.read_bacnet_schedule("1.2.3.4", 3),
+    ],
+    ids=["scan_network", "discover_objects", "read_schedule"],
+)
+def test_entry_points_report_why_the_controller_did_not_start(
+    monkeypatch, call
+) -> None:
+    # given
+    controller = StubController(initialized=False)
+    controller.initialize.return_value = False
+    controller.init_error = "Error opening socket"
+    monkeypatch.setattr(scan_module, "get_bacnet_controller", lambda **_: controller)
+
+    # when
+    result = asyncio.run(call())
+
+    # then
+    assert result.error == "BACnet controller failed to start: Error opening socket"

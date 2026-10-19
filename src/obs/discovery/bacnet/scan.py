@@ -7,7 +7,12 @@ from datetime import datetime
 
 from .._context import utc_now
 from ._loop import run_sync
-from .controller import BACNET_ERRORS, BACNET_OPERATION_TIMEOUT, get_bacnet_controller
+from .controller import (
+    BACNET_ERRORS,
+    BACNET_OPERATION_TIMEOUT,
+    BACnetController,
+    get_bacnet_controller,
+)
 from .controller.schedule_read import SCHEDULE_PROPERTIES
 from .types import (
     BACnetDeviceIdentifier,
@@ -42,6 +47,22 @@ __all__ = [
 ]
 
 
+async def _started_controller(
+    client_ip: str | None, bbmd_ip: str | None
+) -> BACnetController:
+    """The controller for this transport, started.
+
+    Raises RuntimeError with BAC0's reason if it fails to start, so each
+    entry point reports that instead of a later "not initialized".
+    """
+    controller = get_bacnet_controller(client_ip=client_ip, bbmd_ip=bbmd_ip)
+    if not controller._initialized and not await controller.initialize():
+        raise RuntimeError(
+            f"BACnet controller failed to start: {controller.init_error}"
+        )
+    return controller
+
+
 def _timings(started: datetime, finished: datetime) -> BACnetScanTimings:
     return BACnetScanTimings(
         started_at_utc=started.isoformat(),
@@ -66,9 +87,7 @@ async def scan_bacnet_network(
     started = utc_now()
 
     try:
-        controller = get_bacnet_controller(client_ip=client_ip, bbmd_ip=bbmd_ip)
-        if not controller._initialized:
-            await controller.initialize()
+        controller = await _started_controller(client_ip, bbmd_ip)
 
         devices = await controller.scan_network(timeout=timeout)
         finished = utc_now()
@@ -138,9 +157,7 @@ async def discover_bacnet_objects(
     started = utc_now()
 
     try:
-        controller = get_bacnet_controller(client_ip=client_ip, bbmd_ip=bbmd_ip)
-        if not controller._initialized:
-            await controller.initialize()
+        controller = await _started_controller(client_ip, bbmd_ip)
 
         objects = await controller.scan_device_objects(
             device_address,
@@ -214,9 +231,7 @@ async def read_bacnet_schedule(
     controller failed to start). ``timeout`` applies to each property read.
     """
     try:
-        controller = get_bacnet_controller(client_ip=client_ip, bbmd_ip=bbmd_ip)
-        if not controller._initialized:
-            await controller.initialize()
+        controller = await _started_controller(client_ip, bbmd_ip)
         return await controller.read_schedule(device_address, instance, timeout=timeout)
     except _SCAN_FAILURES as exc:
         logger.warning(

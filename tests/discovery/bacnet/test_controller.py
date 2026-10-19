@@ -68,6 +68,39 @@ def test_initialize_returns_false_on_error(monkeypatch) -> None:
     assert result is False
 
 
+class InitializationError(Exception):
+    """Stands in for BAC0's own exception, which is matched by name."""
+
+
+def _fake_bac0(lite: Mock) -> types.SimpleNamespace:
+    return types.SimpleNamespace(log_level=Mock(), lite=lite)
+
+
+def test_initialize_returns_false_on_bac0_initialization_error(monkeypatch) -> None:
+    # given — e.g. BAC0 can't open the socket on a wrong client_ip.
+    controller = BACnetController(client_ip="10.9.9.9/24")
+    lite = Mock(side_effect=InitializationError("Error opening socket"))
+    monkeypatch.setitem(sys.modules, "BAC0", _fake_bac0(lite))
+
+    # when
+    result = asyncio.run(controller.initialize())
+
+    # then
+    assert result is False
+    assert controller._initialized is False
+    assert controller.init_error == "Error opening socket"
+
+
+def test_initialize_does_not_swallow_unexpected_errors(monkeypatch) -> None:
+    # given
+    controller = BACnetController(client_ip="1.1.1.1/24")
+    monkeypatch.setitem(sys.modules, "BAC0", _fake_bac0(Mock(side_effect=KeyError)))
+
+    # when / then
+    with pytest.raises(KeyError):
+        asyncio.run(controller.initialize())
+
+
 def test_auto_detect_ip_success(monkeypatch) -> None:
     # given
     fake_socket = Mock()
